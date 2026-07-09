@@ -23,48 +23,26 @@ class RabBudgetController extends Controller
         $file = $request->file('file');
         $rows = [];
         $errors = [];
-        $headerRowIndex = null;
-        $colMap = [];
 
         try {
             $result = $this->parseXlsxRaw($file->getRealPath(), 30);
-            $allRows = $result['rows'];
+            $sheets = $result['sheets'];
             $errors = $result['errors'];
 
-            // Find header row containing 'uraian' (case-insensitive, partial match)
-            foreach ($allRows as $idx => $row) {
-                $lower = array_map(fn($v) => strtolower(trim((string)$v)), $row);
-                $hasUraian = false;
-                foreach ($lower as $cell) {
-                    if (str_contains($cell, 'uraian')) { $hasUraian = true; break; }
-                }
-                if ($hasUraian) {
-                    $headerRowIndex = $idx;
-                    break;
-                }
-            }
+            $best = $this->findBestSheet($sheets);
 
-            if ($headerRowIndex === null) {
+            if ($best === null) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Header "Uraian" tidak ditemukan dalam 30 baris pertama.',
-                    'debug_first_rows' => array_slice($allRows, 0, 5),
+                    'message' => 'Header tidak ditemukan dalam 30 baris pertama.',
+                    'debug_sheets' => array_map(fn($rows) => count($rows), $sheets),
                 ], 422);
             }
 
-            // Map columns from header
-            $headerRow = $allRows[$headerRowIndex];
-            $colMap = $this->mapColumns($headerRow);
+            $allRows = $best['rows'];
+            $headerRowIndex = $best['headerIndex'];
+            $colMap = $best['colMap'];
 
-            if (!isset($colMap['uraian'])) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Kolom "Uraian" tidak ditemukan pada header.',
-                    'header_found' => $headerRow,
-                ], 422);
-            }
-
-            // Parse data rows after header
             foreach ($allRows as $idx => $row) {
                 if ($idx <= $headerRowIndex) continue;
 
@@ -102,6 +80,7 @@ class RabBudgetController extends Controller
                 'headers' => ['No', 'Uraian Pekerjaan', 'Volume', 'Satuan', 'Harga Satuan (Rp)', 'Jumlah (Rp)'],
                 'rows' => $rows,
                 'total_rows' => count($rows),
+                'sheet_used' => $best['sheetName'],
                 'errors' => $errors,
                 'column_mapping' => $colMap,
             ],
@@ -124,46 +103,27 @@ class RabBudgetController extends Controller
         $errors = [];
         $batchSize = 200;
         $batch = [];
-        $headerRowIndex = null;
-        $colMap = [];
 
         try {
-            $result = $this->parseXlsxRaw($file->getRealPath(), null); // null = all rows
-            $allRows = $result['rows'];
+            $result = $this->parseXlsxRaw($file->getRealPath(), null);
+            $sheets = $result['sheets'];
             $errors = $result['errors'];
 
-            // Find header (partial match)
-            foreach ($allRows as $idx => $row) {
-                $lower = array_map(fn($v) => strtolower(trim((string)$v)), $row);
-                $hasUraian = false;
-                foreach ($lower as $cell) {
-                    if (str_contains($cell, 'uraian')) { $hasUraian = true; break; }
-                }
-                if ($hasUraian) {
-                    $headerRowIndex = $idx;
-                    break;
-                }
-            }
+            $best = $this->findBestSheet($sheets);
 
-            if ($headerRowIndex === null) {
+            if ($best === null) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Header "Uraian" tidak ditemukan.',
+                    'message' => 'Header tidak ditemukan dalam file Excel.',
                 ], 422);
             }
 
-            $colMap = $this->mapColumns($allRows[$headerRowIndex]);
-
-            if (!isset($colMap['uraian'])) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Kolom "Uraian" tidak ditemukan.',
-                ], 422);
-            }
+            $allRows = $best['rows'];
+            $headerRowIndex = $best['headerIndex'];
+            $colMap = $best['colMap'];
 
             DB::beginTransaction();
 
-            // Clear existing RAB for this project
             RabBudget::where('project_id', $projectId)->delete();
 
             foreach ($allRows as $idx => $row) {
@@ -227,12 +187,11 @@ class RabBudgetController extends Controller
     }
 
     /**
-     * Raw XML parse of xlsx - memory efficient, no PhpSpreadsheet needed
-     * xlsx is a zip: xl/sharedStrings.xml (string table) + xl/worksheets/sheet1.xml (data)
+     * Raw XML parse of xlsx - returns data from all sheets.
      */
     private function parseXlsxRaw(string $path, ?int $maxRows): array
     {
-        $rows = [];
+        $sheets = [];
         $errors = [];
         $sharedStrings = [];
 
@@ -246,14 +205,11 @@ class RabBudgetController extends Controller
         if ($ssXml !== false) {
             $xml = simplexml_load_string($ssXml);
             if ($xml) {
-                $ns = $xml->getNamespaces(true);
                 foreach ($xml->si as $si) {
-                    // Handle rich text (multiple <t> elements)
                     $text = '';
                     if (isset($si->t)) {
                         $text = (string)$si->t;
                     } else {
-                        // Rich text: concatenate all <r><t>...</t></r>
                         foreach ($si->r as $r) {
                             $text .= (string)$r->t;
                         }
@@ -263,62 +219,169 @@ class RabBudgetController extends Controller
             }
         }
 
-        // 2. Read sheet data
-        $sheetXml = $zip->getFromName('xl/worksheets/sheet1.xml');
-        if ($sheetXml === false) {
-            $zip->close();
-            throw new \RuntimeException('No sheet1.xml found');
+        // 2. Discover all sheet files directly from zip (most robust)
+        $sheetFiles = [];
+        for ($i = 0; $i < $zip->numFiles; $i++) {
+            $name = $zip->getNameIndex($i);
+            if (preg_match('#^xl/worksheets/sheet(\d+)\.xml$#', $name, $m)) {
+                $sheetFiles[(int)$m[1]] = $name;
+            }
+        }
+        ksort($sheetFiles);
+
+        if (empty($sheetFiles)) {
+            $sheetFiles[1] = 'xl/worksheets/sheet1.xml';
         }
 
-        $xml = simplexml_load_string($sheetXml);
-        if (!$xml) {
-            $zip->close();
-            throw new \RuntimeException('Cannot parse sheet XML');
-        }
+        // 3. Parse each sheet independently
+        foreach ($sheetFiles as $sheetNum => $sheetPath) {
+            $sheetName = "Sheet$sheetNum";
+            $sheetXml = $zip->getFromName($sheetPath);
+            if ($sheetXml === false) continue;
 
-        $rowCount = 0;
-        foreach ($xml->sheetData->row as $rowNode) {
-            if ($maxRows !== null && $rowCount >= $maxRows) break;
+            $xml = simplexml_load_string($sheetXml);
+            if (!$xml) continue;
 
-            $rowData = [];
-            $maxCol = 0;
+            $sheetRows = [];
+            foreach ($xml->sheetData->row as $rowNode) {
+                if ($maxRows !== null && count($sheetRows) >= $maxRows) break;
 
-            foreach ($rowNode->c as $cell) {
-                $ref = (string)$cell['r']; // e.g. "A1", "B5"
-                $colIndex = $this->columnLetterToIndex(preg_replace('/\d+/', '', $ref));
-
-                $type = (string)$cell['t'];
-                $value = null;
-
-                if ($type === 's') {
-                    // Shared string reference
-                    $si = (int)$cell->v;
-                    $value = $sharedStrings[$si] ?? '';
-                } elseif (isset($cell->v)) {
-                    $value = (string)$cell->v;
-                } elseif (isset($cell->is->t)) {
-                    // Inline string
-                    $value = (string)$cell->is->t;
+                $rowData = [];
+                foreach ($rowNode->c as $cell) {
+                    $ref = (string)$cell['r'];
+                    $colIndex = $this->columnLetterToIndex(preg_replace('/\d+/', '', $ref));
+                    $type = (string)$cell['t'];
+                    $value = null;
+                    if ($type === 's') {
+                        $si = (int)$cell->v;
+                        $value = $sharedStrings[$si] ?? '';
+                    } elseif (isset($cell->v)) {
+                        $value = (string)$cell->v;
+                    } elseif (isset($cell->is->t)) {
+                        $value = (string)$cell->is->t;
+                    }
+                    while (count($rowData) <= $colIndex) {
+                        $rowData[] = '';
+                    }
+                    $rowData[$colIndex] = $value;
                 }
-
-                // Ensure array is large enough
-                while (count($rowData) <= $colIndex) {
-                    $rowData[] = '';
-                }
-                $rowData[$colIndex] = $value;
-                $maxCol = max($maxCol, $colIndex);
+                $sheetRows[] = $rowData;
             }
 
-            $rows[] = $rowData;
-            $rowCount++;
+            $sheets[$sheetName] = $sheetRows;
         }
 
         $zip->close();
-        return ['rows' => $rows, 'errors' => $errors];
+        return ['sheets' => $sheets, 'errors' => $errors];
     }
 
     /**
-     * Convert column letter (A, B, ..., Z, AA, AB, ...) to 0-based index
+     * Find the best sheet and header from multi-sheet xlsx data.
+     * Prefers sheets that have ALL required columns (uraian, volume, harga_satuan).
+     */
+    private function findBestSheet(array $sheets): ?array
+    {
+        $headerKeywords = ['uraian', 'deskripsi', 'pekerjaan', 'description', 'item', 'nama barang', 'uraian barang', 'harga satuan'];
+        $requiredCols = ['uraian', 'volume', 'harga_satuan'];
+        $best = null;
+        $bestScore = 0;
+
+        foreach ($sheets as $sheetName => $rows) {
+            $headerRowIndex = null;
+
+            // Find header row
+            foreach ($rows as $idx => $row) {
+                $lower = array_map(fn($v) => strtolower(trim((string)$v)), $row);
+                $matchCount = 0;
+                foreach ($lower as $cell) {
+                    foreach ($headerKeywords as $keyword) {
+                        if (str_contains($cell, $keyword)) { $matchCount++; break; }
+                    }
+                }
+                if ($matchCount >= 2) {
+                    $headerRowIndex = $idx;
+                    break;
+                }
+            }
+
+            // Fallback: try single keyword
+            if ($headerRowIndex === null) {
+                foreach ($rows as $idx => $row) {
+                    $lower = array_map(fn($v) => strtolower(trim((string)$v)), $row);
+                    foreach ($lower as $cell) {
+                        if (str_contains($cell, 'uraian') || str_contains($cell, 'harga satuan')) {
+                            $headerRowIndex = $idx;
+                            break 2;
+                        }
+                    }
+                }
+            }
+
+            if ($headerRowIndex === null) continue;
+
+            $colMap = $this->mapColumns($rows[$headerRowIndex]);
+            if (!isset($colMap['uraian'])) continue;
+
+            // Merge multi-row headers
+            if (!isset($colMap['volume']) || !isset($colMap['harga_satuan'])) {
+                for ($next = $headerRowIndex + 1; $next < min($headerRowIndex + 3, count($rows)); $next++) {
+                    $colMap2 = $this->mapColumns($rows[$next]);
+                    if (isset($colMap2['volume']) && !isset($colMap['volume'])) $colMap['volume'] = $colMap2['volume'];
+                    if (isset($colMap2['harga_satuan']) && !isset($colMap['harga_satuan'])) $colMap['harga_satuan'] = $colMap2['harga_satuan'];
+                    if (isset($colMap2['jumlah']) && !isset($colMap['jumlah'])) $colMap['jumlah'] = $colMap2['jumlah'];
+                    if (isset($colMap['volume']) && isset($colMap['harga_satuan'])) break;
+                }
+            }
+
+            $requiredCount = 0;
+            foreach ($requiredCols as $col) {
+                if (isset($colMap[$col])) $requiredCount++;
+            }
+
+            if ($requiredCount === 0) continue;
+
+            $dataRows = 0;
+            $numericRows = 0;  // rows with numeric volume+harga_satuan
+            foreach ($rows as $idx => $row) {
+                if ($idx <= $headerRowIndex) continue;
+                $uraian = trim((string)($row[$colMap['uraian']] ?? ''));
+                if ($uraian !== '' && strtolower($uraian) !== 'jumlah' && strtolower($uraian) !== 'total') {
+                    $dataRows++;
+                    // Check if volume and harga_satuan have numeric values
+                    $vol = $this->parseNumber($row[$colMap['volume'] ?? -1] ?? null);
+                    $harga = $this->parseNumber($row[$colMap['harga_satuan'] ?? -1] ?? null);
+                    if ($vol !== null && $harga !== null) {
+                        $numericRows++;
+                    }
+                }
+            }
+
+            if ($dataRows === 0) continue;
+
+            // Quality score: required columns + numeric data quality
+            // Prefer sheets with more numeric data (real RAB items vs reference sheets)
+            $qualityScore = $requiredCount * 1000 + $numericRows;
+
+            if ($qualityScore > $bestScore ||
+                ($qualityScore === $bestScore && ($best === null || $dataRows > $best['dataRows']))) {
+                $best = [
+                    'sheetName' => $sheetName,
+                    'rows' => $rows,
+                    'headerIndex' => $headerRowIndex,
+                    'colMap' => $colMap,
+                    'dataRows' => $dataRows,
+                    'requiredCount' => $requiredCount,
+                    'numericRows' => $numericRows,
+                ];
+                $bestScore = $qualityScore;
+            }
+        }
+
+        return $best;
+    }
+
+    /**
+     * Convert column letter to 0-based index
      */
     private function columnLetterToIndex(string $letter): int
     {
@@ -332,30 +395,58 @@ class RabBudgetController extends Controller
     }
 
     /**
-     * Map header row to known column names
+     * Map header row to known column names.
+     * Uses longest-match-first to avoid false positives.
+     * Strips parenthetical suffixes like "(Rp)".
      */
     private function mapColumns(array $headerRow): array
     {
         $map = [];
+
         $knownCols = [
-            'no' => ['no', 'nomor', 'no.', 'no urut'],
-            'kode' => ['kode', 'kode pekerjaan', 'kode rekening', 'item'],
-            'uraian' => ['uraian', 'uraian pekerjaan', 'deskripsi', 'description', 'pekerjaan'],
-            'volume' => ['volume', 'vol', 'qty', 'quantity'],
-            'satuan' => ['satuan', 'unit', 'uom'],
-            'harga_satuan' => ['harga satuan', 'harga_satuan', 'hs', 'harga', 'unit price', 'harga per satuan'],
-            'jumlah' => ['jumlah', 'total', 'jml', 'amount', 'total harga'],
+            'no' => ['nomor urut', 'no urut', 'nomor', 'no.'],
+            'kode' => ['kode pekerjaan', 'kode rekening', 'kode barang', 'kode item', 'kode akun', 'kode'],
+            'uraian' => ['uraian pekerjaan', 'uraian barang', 'nama pekerjaan', 'jenis barang/jasa', 'nama barang', 'deskripsi', 'description', 'rincian', 'keterangan', 'pekerjaan', 'uraian'],
+            'volume' => ['volume', 'vol', 'qty', 'quantity', 'kuantitas'],
+            'satuan' => ['satuan unit', 'satuan', 'uom'],
+            'harga_satuan' => ['harga satuan', 'harga_satuan', 'unit price', 'harga per satuan', 'hs', 'harga'],
+            'jumlah' => ['jumlah harga satuan', 'total harga', 'total biaya', 'subtotal', 'sub total', 'amount', 'nilai', 'jumlah', 'total'],
+            'kategori' => ['kode kategori', 'kelompok', 'category', 'kategori', 'group', 'jenis'],
         ];
 
         foreach ($headerRow as $colIdx => $header) {
+            if ($header === null) continue;
             $h = strtolower(trim((string)$header));
+            $h = trim(preg_replace('/\s*\(.*?\)\s*/', '', $h));
+            if ($h === '') continue;
+
+            $bestLen = 0;
+            $bestKey = null;
+
             foreach ($knownCols as $key => $aliases) {
                 foreach ($aliases as $alias) {
-                    if ($h === $alias || str_contains($h, $alias)) {
-                        $map[$key] = $colIdx;
-                        break 2;
+                    $a = strtolower($alias);
+                    // Exact match = highest priority
+                    if ($h === $a) {
+                        $bestLen = strlen($a) * 100;
+                        $bestKey = $key;
+                        break;
+                    }
+                    // Starts with alias
+                    if (str_starts_with($h, $a) && strlen($a) > $bestLen) {
+                        $bestLen = strlen($a);
+                        $bestKey = $key;
+                    }
+                    // Alias is a whole word in the cell
+                    elseif (preg_match('/\b' . preg_quote($a, '/') . '\b/', $h) && strlen($a) > $bestLen) {
+                        $bestLen = strlen($a);
+                        $bestKey = $key;
                     }
                 }
+            }
+
+            if ($bestKey !== null) {
+                $map[$bestKey] = $colIdx;
             }
         }
 
@@ -363,7 +454,7 @@ class RabBudgetController extends Controller
     }
 
     /**
-     * Parse number from various formats (Indonesian: 1.000.000,00 or English: 1,000,000.00)
+     * Parse number from various formats
      */
     private function parseNumber($value): ?float
     {
@@ -371,7 +462,7 @@ class RabBudgetController extends Controller
         if (is_numeric($value)) return (float)$value;
 
         $s = trim((string)$value);
-        $s = str_replace(['Rp', 'rp', 'RP', ' '], '', $s);
+        $s = str_replace(['Rp', 'rp', 'RP', 'Rp.', 'Rp. ', ' '], '', $s);
 
         // Indonesian format: 1.000.000,50
         if (preg_match('/^\d{1,3}(\.\d{3})+(,\d+)?$/', $s)) {
@@ -386,7 +477,6 @@ class RabBudgetController extends Controller
             return is_numeric($s) ? (float)$s : null;
         }
 
-        // Plain number with comma decimal
         $s = str_replace(',', '.', $s);
         return is_numeric($s) ? (float)$s : null;
     }
@@ -448,9 +538,6 @@ class RabBudgetController extends Controller
         return response()->json(['success' => true, 'message' => 'RAB item deleted']);
     }
 
-    /**
-     * Submit RAB for approval (bulk: all DRAFT items for a project)
-     */
     public function submitForApproval(Request $request)
     {
         $request->validate(['project_id' => 'required|exists:projects,id']);
@@ -462,9 +549,6 @@ class RabBudgetController extends Controller
         ]);
     }
 
-    /**
-     * Approve all pending RAB items for a project
-     */
     public function approve(Request $request)
     {
         $request->validate(['project_id' => 'required|exists:projects,id']);
@@ -476,9 +560,6 @@ class RabBudgetController extends Controller
         ]);
     }
 
-    /**
-     * Reject all pending RAB items for a project
-     */
     public function reject(Request $request)
     {
         $request->validate(['project_id' => 'required|exists:projects,id']);
@@ -490,9 +571,6 @@ class RabBudgetController extends Controller
         ]);
     }
 
-    /**
-     * Roll-up summary by category
-     */
     public function rollUp(Request $request)
     {
         $request->validate(['project_id' => 'required|exists:projects,id']);
@@ -517,7 +595,11 @@ class RabBudgetController extends Controller
 
         $totalBudget = $query->sum('total_price');
         $totalItems = $query->count();
-        $byStatus = RabBudget::select(DB::raw("COALESCE(category, 'Umum') as status"), DB::raw('count(*) as count'), DB::raw('sum(total_price) as total'))
+        $byCategory = RabBudget::select(
+                DB::raw("COALESCE(category, 'Umum') as category_name"),
+                DB::raw('count(*) as count'),
+                DB::raw('sum(total_price) as total')
+            )
             ->when($projectId, fn($q) => $q->where('project_id', $projectId))
             ->groupBy('category')
             ->get();
@@ -527,7 +609,7 @@ class RabBudgetController extends Controller
             'data' => [
                 'total_budget' => $totalBudget,
                 'total_items' => $totalItems,
-                'by_status' => $byStatus,
+                'by_category' => $byCategory,
             ],
         ]);
     }
