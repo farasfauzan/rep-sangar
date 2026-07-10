@@ -55,8 +55,25 @@ class ValidateRabImportJob implements ShouldQueue
                     continue;
                 }
 
+                $currentCategory = $sheetInfo['sheetName']; // default category = sheet name
+
                 foreach ($this->streamRows($job->file_path, $job->file_type, $sheetInfo['sheetName']) as $idx => $row) {
                     if ($idx <= $sheetInfo['headerIndex']) continue;
+
+                    // Detect section header: description present, all numeric columns empty/null
+                    $descCol = $sheetInfo['colMap']['uraian'] ?? -1;
+                    $volCol = $sheetInfo['colMap']['volume'] ?? -1;
+                    $priceCol = $sheetInfo['colMap']['harga_satuan'] ?? -1;
+                    $desc = trim((string)($row[$descCol] ?? ''));
+                    $vol = $row[$volCol] ?? null;
+                    $price = $row[$priceCol] ?? null;
+                    $amount = $row[$sheetInfo['colMap']['jumlah'] ?? -1] ?? null;
+
+                    if ($desc !== '' && $vol === null && $price === null && $amount === null) {
+                        // This is a section header row — use as category for subsequent rows
+                        $currentCategory = $desc;
+                        continue;
+                    }
 
                     $normalized = $this->normalizeRabRow($row, $sheetInfo['colMap'], $idx + 1);
                     
@@ -71,9 +88,9 @@ class ValidateRabImportJob implements ShouldQueue
 
                     if (! $normalized) continue;
 
-                    // If row has no category, default to sheetName
+                    // If row has no category from column, use tracked section header
                     if (!isset($normalized['category']) || $normalized['category'] === null || $normalized['category'] === '') {
-                        $normalized['category'] = $sheetInfo['sheetName'];
+                        $normalized['category'] = $currentCategory;
                     }
 
                     $newItems[] = $normalized;

@@ -34,6 +34,42 @@ trait HandlesRabParsing
     /**
      * Parse the first N rows of a file for preview/sheet identification.
      */
+    /**
+     * Read actual sheet names from XLSX workbook.xml
+     */
+    protected function readSheetNames(\ZipArchive $zip): array
+    {
+        $names = [];
+        $workbookXml = $zip->getFromName('xl/workbook.xml');
+        if ($workbookXml === false) return $names;
+
+        $xml = simplexml_load_string($workbookXml);
+        if (!$xml) return $names;
+
+        $ns = $xml->getNamespaces(true);
+        $sheets = $xml->sheets ?? $xml->children($ns[''] ?? '')->sheets ?? null;
+        if (!$sheets) {
+            // Try with namespace
+            foreach ($ns as $prefix => $uri) {
+                $sheets = $xml->children($uri)->sheets;
+                if ($sheets) break;
+            }
+        }
+
+        if ($sheets) {
+            foreach ($sheets->sheet as $sheet) {
+                $attrs = $sheet->attributes();
+                $rId = (string)($attrs['r:id'] ?? $attrs['state'] ?? '');
+                $name = (string)($attrs['name'] ?? '');
+                if ($name !== '') {
+                    $names[] = $name;
+                }
+            }
+        }
+
+        return $names;
+    }
+
     protected function parseRaw(string $path, string $type, ?int $maxRows = null): array
     {
         $type = strtolower($type);
@@ -45,6 +81,8 @@ trait HandlesRabParsing
             if ($zip->open($path) !== true) {
                 throw new \RuntimeException('Tidak dapat membuka file XLSX.');
             }
+
+            $sheetNames = $this->readSheetNames($zip);
 
             $sheetFiles = [];
             for ($i = 0; $i < $zip->numFiles; $i++) {
@@ -60,7 +98,8 @@ trait HandlesRabParsing
             $zip->close();
 
             foreach ($sheetFiles as $sheetNum => $sheetPath) {
-                $sheetName = "Sheet$sheetNum";
+                // Use actual sheet name if available, otherwise fallback to "SheetN"
+                $sheetName = $sheetNames[$sheetNum - 1] ?? "Sheet$sheetNum";
                 $sheetRows = [];
                 foreach ($this->streamWorksheetRows($path, $sheetName) as $row) {
                     if ($maxRows !== null && count($sheetRows) >= $maxRows) break;
@@ -135,18 +174,59 @@ trait HandlesRabParsing
     /**
      * XLSX Reader (raw XML zip streaming)
      */
-    protected function streamWorksheetRows(string $path, string $sheetName): \Generator
+    /**
+     * Resolve sheet name to sheet file number via workbook.xml
+     */
+    protected function resolveSheetNumber(\ZipArchive $zip, string $sheetName): int
     {
-        if (! preg_match('/^Sheet(\d+)$/', $sheetName, $matches)) {
-            $sheetNum = 1;
-        } else {
-            $sheetNum = $matches[1];
+        // If already "SheetN" format, extract directly
+        if (preg_match('/^Sheet(\d+)$/', $sheetName, $m)) {
+            return (int)$m[1];
         }
 
+        // Read workbook.xml to find sheet index by name
+        $workbookXml = $zip->getFromName('xl/workbook.xml');
+        if ($workbookXml !== false) {
+            $xml = simplexml_load_string($workbookXml);
+            if ($xml) {
+                $ns = $xml->getNamespaces(true);
+                foreach ($ns as $prefix => $uri) {
+                    $sheetsNode = $xml->children($uri)->sheets;
+                    if ($sheetsNode) {
+                        $idx = 1;
+                        foreach ($sheetsNode->sheet as $sheet) {
+                            $name = (string)($sheet->attributes()->name ?? '');
+                            if ($name === $sheetName) {
+                                return $idx;
+                            }
+                            $idx++;
+                        }
+                    }
+                }
+                // Try without namespace
+                if (isset($xml->sheets)) {
+                    $idx = 1;
+                    foreach ($xml->sheets->sheet as $sheet) {
+                        $name = (string)($sheet['name'] ?? '');
+                        if ($name === $sheetName) {
+                            return $idx;
+                        }
+                        $idx++;
+                    }
+                }
+            }
+        }
+
+        return 1; // fallback
+    }
+
+    protected function streamWorksheetRows(string $path, string $sheetName): \Generator
+    {
         $zip = new \ZipArchive();
         if ($zip->open($path) !== true) {
             throw new \RuntimeException('Tidak dapat membuka file XLSX.');
         }
+        $sheetNum = $this->resolveSheetNumber($zip, $sheetName);
         $sharedStrings = $this->sharedStrings($zip);
         $zip->close();
 
