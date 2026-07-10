@@ -56,12 +56,24 @@ class ValidateRabImportJob implements ShouldQueue
                 }
 
                 $currentCategory = $sheetInfo['sheetName']; // default category = sheet name
-                $currentSectionCode = '';
+                $currentSectionCode = '0101';
+                $currentResourceCategory = null;
+
+                $mainSectionCount = 0;
+                $subSectionCount = 1;
+                $itemCount = 1;
+
+                $resourceCounters = [
+                    'Material' => 10001,
+                    'Upah' => 10001,
+                    'Alat' => 10001,
+                    'Subkon' => 10001,
+                ];
 
                 foreach ($this->streamRows($job->file_path, $job->file_type, $sheetInfo['sheetName']) as $idx => $row) {
                     if ($idx <= $sheetInfo['headerIndex']) continue;
 
-                    // Detect section header: description present, all numeric columns empty/null
+                    // Extract columns
                     $descCol = $sheetInfo['colMap']['uraian'] ?? -1;
                     $volCol = $sheetInfo['colMap']['volume'] ?? -1;
                     $priceCol = $sheetInfo['colMap']['harga_satuan'] ?? -1;
@@ -72,10 +84,24 @@ class ValidateRabImportJob implements ShouldQueue
                     $amount = $row[$sheetInfo['colMap']['jumlah'] ?? -1] ?? null;
                     $kode = trim((string)($row[$kodeCol] ?? ''));
 
+                    // Detect section header: description present, all numeric columns empty/null
                     if ($desc !== '' && $vol === null && $price === null && $amount === null) {
-                        // This is a section header row — use as category for subsequent rows
-                        $currentCategory = $desc;
-                        $currentSectionCode = $kode;
+                        $resCat = $this->detectResourceCategory($desc);
+                        if ($resCat !== null) {
+                            $currentResourceCategory = $resCat;
+                        } else {
+                            $currentResourceCategory = null;
+                            if ($this->isLevel1Section($desc, $kode)) {
+                                $mainSectionCount++;
+                                $subSectionCount = 1;
+                                $itemCount = 1;
+                            } else {
+                                $subSectionCount++;
+                                $itemCount = 1;
+                            }
+                            $currentSectionCode = str_pad($mainSectionCount ?: 1, 2, '0', STR_PAD_LEFT) . str_pad($subSectionCount, 2, '0', STR_PAD_LEFT);
+                            $currentCategory = $desc;
+                        }
                         continue;
                     }
 
@@ -92,9 +118,28 @@ class ValidateRabImportJob implements ShouldQueue
 
                     if (! $normalized) continue;
 
-                    // If row has no category from column, use tracked section header
-                    if (!isset($normalized['category']) || $normalized['category'] === null || $normalized['category'] === '') {
-                        $normalized['category'] = $currentCategory;
+                    // Generate hierarchical or resource code if empty
+                    if (!isset($normalized['code_item']) || $normalized['code_item'] === null || $normalized['code_item'] === '') {
+                        if ($currentResourceCategory !== null) {
+                            $prefix = [
+                                'Material' => 'M',
+                                'Upah' => 'T',
+                                'Alat' => 'A',
+                                'Subkon' => 'S',
+                            ][$currentResourceCategory] ?? 'M';
+                            $normalized['code_item'] = $prefix . $resourceCounters[$currentResourceCategory]++;
+                            $normalized['category'] = $currentResourceCategory;
+                        } else {
+                            $normalized['code_item'] = $currentSectionCode . str_pad($itemCount++, 2, '0', STR_PAD_LEFT);
+                            $normalized['category'] = $currentCategory;
+                        }
+                    } else {
+                        // Keep existing code, but assign appropriate category
+                        if ($currentResourceCategory !== null) {
+                            $normalized['category'] = $currentResourceCategory;
+                        } else {
+                            $normalized['category'] = $currentCategory;
+                        }
                     }
 
                     $newItems[] = $normalized;

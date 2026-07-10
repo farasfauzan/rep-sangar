@@ -697,6 +697,56 @@ trait HandlesRabParsing
     }
 
     /**
+     * Detect if a section header represents a resource category (Material/Upah/Alat/Subkon).
+     */
+    protected function detectResourceCategory(string $description): ?string
+    {
+        $desc = strtolower(trim($description));
+        if (str_contains($desc, 'bahan') || str_contains($desc, 'material')) {
+            return 'Material';
+        }
+        if (str_contains($desc, 'upah') || str_contains($desc, 'tenaga kerja') || str_contains($desc, 'tenaga') || str_contains($desc, 'pekerja')) {
+            return 'Upah';
+        }
+        if (str_contains($desc, 'alat') || str_contains($desc, 'peralatan') || str_contains($desc, 'mesin')) {
+            return 'Alat';
+        }
+        if (str_contains($desc, 'subkon') || str_contains($desc, 'subkontraktor') || str_contains($desc, 'sub kontraktor')) {
+            return 'Subkon';
+        }
+        return null;
+    }
+
+    /**
+     * Check if a section code or description represents a Level 1 main section.
+     */
+    protected function isLevel1Section(string $text, ?string $kode): bool
+    {
+        $t = trim($text);
+        $k = trim((string)$kode);
+
+        // If code matches Roman numerals or single letters
+        if ($k !== '') {
+            if (preg_match('/^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})\.?$/i', $k)) {
+                return true;
+            }
+            if (preg_match('/^[A-Z]\.?$/i', $k)) {
+                return true;
+            }
+        }
+
+        // If code is empty, check description prefix
+        if (preg_match('/^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})\b/i', $t)) {
+            return true;
+        }
+        if (preg_match('/^[A-Z]\b/i', $t)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
      * Identify all sheets that have a valid RAB structure.
      */
     protected function findValidSheets(array $sheets): array
