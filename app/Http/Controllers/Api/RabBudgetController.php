@@ -402,6 +402,15 @@ class RabBudgetController extends Controller
 
         if ($projectId) {
             $query->where('project_id', $projectId);
+            $latestVersion = RabBudget::where('project_id', $projectId)->max('version') ?? 1;
+            $query->where('version', $latestVersion);
+        }
+
+        if ($request->get('per_page') == -1 || $request->get('all') == 1) {
+            return response()->json([
+                'success' => true,
+                'data' => $query->orderBy('id')->get(),
+            ]);
         }
 
         return response()->json([
@@ -505,16 +514,21 @@ class RabBudgetController extends Controller
 
         if ($projectId) {
             $query->where('project_id', $projectId);
+            $latestVersion = RabBudget::where('project_id', $projectId)->max('version') ?? 1;
+            $query->where('version', $latestVersion);
         }
 
         $totalBudget = $query->sum('total_price');
         $totalItems = $query->count();
+        
+        $latestVersion = $projectId ? (RabBudget::where('project_id', $projectId)->max('version') ?? 1) : null;
+
         $byCategory = RabBudget::select(
                 DB::raw("COALESCE(category, 'Umum') as category_name"),
                 DB::raw('count(*) as count'),
                 DB::raw('sum(total_price) as total')
             )
-            ->when($projectId, fn($q) => $q->where('project_id', $projectId))
+            ->when($projectId, fn($q) => $q->where('project_id', $projectId)->where('version', $latestVersion))
             ->groupBy('category')
             ->get();
 

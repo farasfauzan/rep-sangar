@@ -206,10 +206,10 @@ export default function Dashboard({ auth }) {
         if (!pid) return;
         setLoadingRab(true);
         try {
-            const params = { project_id: pid, per_page: 500 };
+            const params = { project_id: pid, per_page: -1 };
             const response = await axios.get('/api/rab', { params });
-            const paginator = response.data.data;
-            const rows = paginator?.data ?? paginator ?? [];
+            const result = response.data?.data;
+            const rows = Array.isArray(result) ? result : (result?.data ?? result ?? []);
             setRabData(Array.isArray(rows) ? rows : []);
         } catch (error) {
             console.error('Failed to fetch RAB data', error);
@@ -224,7 +224,8 @@ export default function Dashboard({ auth }) {
         try {
             const response = await axios.get('/api/rab/summary', { params: { project_id: pid } });
             setSummary(response.data.data);
-            const cats = Object.keys(response.data.data?.by_category ?? {});
+            const byCategory = response.data.data?.by_category ?? [];
+            const cats = Array.isArray(byCategory) ? byCategory.map(c => c.category_name) : [];
             setCategories(cats);
         } catch { setSummary(null); }
     };
