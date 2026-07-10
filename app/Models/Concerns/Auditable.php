@@ -32,7 +32,14 @@ trait Auditable
 
     protected function audit(string $action, array $old, array $new): void
     {
-        $userId = request()->user()?->id ?? 1; // fallback to system user
+        $userId = request()->user()?->id;
+
+        // Jangan menulis audit log jika tidak ada user terautentikasi.
+        // Sebelumnya fallback ke user_id=1 yang menyesatkan akuntabilitas.
+        if ($userId === null) {
+            return;
+        }
+
         AuditLog::create([
             'user_id'        => $userId,
             'auditable_type' => static::class,

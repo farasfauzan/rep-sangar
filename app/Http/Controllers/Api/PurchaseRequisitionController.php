@@ -40,7 +40,7 @@ class PurchaseRequisitionController extends Controller
         $pr = PurchaseRequisition::create([
             ...$request->only(['project_id', 'rab_budget_id', 'item_name', 'unit', 'qty_requested', 'notes']),
             'requested_by' => Auth::id(),
-            'pr_number'    => 'PR-' . date('Ymd') . '-' . str_pad(PurchaseRequisition::max('id') + 1, 4, '0', STR_PAD_LEFT),
+            'pr_number'    => 'PR-' . date('Ymd') . '-' . str_pad(PurchaseRequisition::withTrashed()->max('id') + 1, 4, '0', STR_PAD_LEFT),
             'status'       => 'PENDING',
         ]);
 
@@ -55,14 +55,30 @@ class PurchaseRequisitionController extends Controller
 
     public function approve(Request $request, $id)
     {
-        $pr = PurchaseRequisition::findOrFail($id);
+        $pr = PurchaseRequisition::lockForUpdate()->findOrFail($id);
+
+        if ($pr->status !== 'PENDING') {
+            return response()->json([
+                'success' => false,
+                'message' => "Purchase Requisition tidak dapat di-approve. Status saat ini: {$pr->status}.",
+            ], 422);
+        }
+
         $pr->approve(Auth::user(), $request->get('qty_approved'));
         return response()->json(['success' => true, 'data' => $pr]);
     }
 
     public function reject(Request $request, $id)
     {
-        $pr = PurchaseRequisition::findOrFail($id);
+        $pr = PurchaseRequisition::lockForUpdate()->findOrFail($id);
+
+        if ($pr->status !== 'PENDING') {
+            return response()->json([
+                'success' => false,
+                'message' => "Purchase Requisition tidak dapat di-reject. Status saat ini: {$pr->status}.",
+            ], 422);
+        }
+
         $pr->reject(Auth::user(), $request->get('reason'));
         return response()->json(['success' => true, 'data' => $pr]);
     }

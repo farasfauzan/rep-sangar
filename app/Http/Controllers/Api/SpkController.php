@@ -7,6 +7,7 @@ use App\Models\ApprovalLog;
 use App\Models\Spk;
 use App\Support\WorkflowState;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class SpkController extends Controller
 {
@@ -47,45 +48,54 @@ class SpkController extends Controller
 
     public function submit(Request $request, $id)
     {
-        $spk = Spk::findOrFail($id);
-        WorkflowState::require(
-            $spk->status,
-            ['DRAFT'],
-            'Hanya SPK berstatus DRAFT yang dapat dikirim untuk approval.'
-        );
-        $spk->update(['status' => 'PENDING_APPROVAL']);
-        $this->log($request, $spk, 'SUBMIT');
+        $spk = DB::transaction(function () use ($request, $id) {
+            $spk = Spk::lockForUpdate()->findOrFail($id);
+            WorkflowState::require(
+                $spk->status,
+                ['DRAFT'],
+                'Hanya SPK berstatus DRAFT yang dapat dikirim untuk approval.'
+            );
+            $spk->update(['status' => 'PENDING_APPROVAL']);
+            $this->log($request, $spk, 'SUBMIT');
+            return $spk;
+        });
 
         return response()->json(['message' => 'SPK dikirim untuk approval.', 'data' => $spk]);
     }
 
     public function approve(Request $request, $id)
     {
-        $spk = Spk::findOrFail($id);
-        WorkflowState::require(
-            $spk->status,
-            ['PENDING_APPROVAL'],
-            'SPK harus berstatus PENDING_APPROVAL sebelum disetujui.'
-        );
-        $spk->update([
-            'status' => 'APPROVED',
-            'approved_by' => $request->user()->id ?? 1,
-        ]);
-        $this->log($request, $spk, 'APPROVE');
+        $spk = DB::transaction(function () use ($request, $id) {
+            $spk = Spk::lockForUpdate()->findOrFail($id);
+            WorkflowState::require(
+                $spk->status,
+                ['PENDING_APPROVAL'],
+                'SPK harus berstatus PENDING_APPROVAL sebelum disetujui.'
+            );
+            $spk->update([
+                'status' => 'APPROVED',
+                'approved_by' => $request->user()->id ?? 1,
+            ]);
+            $this->log($request, $spk, 'APPROVE');
+            return $spk;
+        });
 
         return response()->json(['message' => 'SPK disetujui.', 'data' => $spk]);
     }
 
     public function reject(Request $request, $id)
     {
-        $spk = Spk::findOrFail($id);
-        WorkflowState::require(
-            $spk->status,
-            ['PENDING_APPROVAL'],
-            'SPK harus berstatus PENDING_APPROVAL sebelum ditolak.'
-        );
-        $spk->update(['status' => 'REJECTED']);
-        $this->log($request, $spk, 'REJECT', $request->input('notes'));
+        $spk = DB::transaction(function () use ($request, $id) {
+            $spk = Spk::lockForUpdate()->findOrFail($id);
+            WorkflowState::require(
+                $spk->status,
+                ['PENDING_APPROVAL'],
+                'SPK harus berstatus PENDING_APPROVAL sebelum ditolak.'
+            );
+            $spk->update(['status' => 'REJECTED']);
+            $this->log($request, $spk, 'REJECT', $request->input('notes'));
+            return $spk;
+        });
 
         return response()->json(['message' => 'SPK ditolak.', 'data' => $spk]);
     }

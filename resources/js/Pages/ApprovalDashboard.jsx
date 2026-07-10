@@ -21,15 +21,20 @@ export default function ApprovalDashboard() {
 
     const fetchData = async () => {
         setLoading(true);
-        const [pos, spks, invoices, funds] = await Promise.all([
-            axios.get('/api/pos'),
-            axios.get('/api/spks'),
-            axios.get('/api/opnames'),
-            axios.get('/api/invoices'),
-            axios.get('/api/fund-requests'),
-        ]);
-        setData({ pos: pos.data, spks: spks.data, opnames: opnames.data, invoices: invoices.data, funds: funds.data });
-        setLoading(false);
+        try {
+            const [pos, spks, opnames, invoices, funds] = await Promise.all([
+                axios.get('/api/pos'),
+                axios.get('/api/spks'),
+                axios.get('/api/opnames'),
+                axios.get('/api/invoices'),
+                axios.get('/api/fund-requests'),
+            ]);
+            setData({ pos: pos.data, spks: spks.data, opnames: opnames.data, invoices: invoices.data, funds: funds.data });
+        } catch (err) {
+            alert('Gagal memuat data: ' + (err.response?.data?.message || err.message));
+        } finally {
+            setLoading(false);
+        }
     };
 
     const fetchRabPending = async (projectId) => {

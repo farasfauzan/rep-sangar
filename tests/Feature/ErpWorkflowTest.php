@@ -20,6 +20,7 @@ class ErpWorkflowTest extends TestCase
     public function test_material_flow_must_follow_rab_po_receipt_invoice_and_payment_stages(): void
     {
         $user = User::factory()->create();
+        $this->actingAs($user, 'sanctum');
         $project = $this->project();
         $rab = $this->rab($project, 'DRAFT');
 
@@ -92,6 +93,7 @@ class ErpWorkflowTest extends TestCase
     public function test_spk_invoice_must_reference_an_approved_opname_once(): void
     {
         $user = User::factory()->create();
+        $this->actingAs($user, 'sanctum');
         $project = $this->project();
 
         $spkResponse = $this->actingAs($user)->postJson('/api/spks', [
@@ -152,6 +154,7 @@ class ErpWorkflowTest extends TestCase
     public function test_fund_request_must_be_approved_paid_and_accounted_for_in_sequence(): void
     {
         $user = User::factory()->create();
+        $this->actingAs($user, 'sanctum');
         $project = $this->project();
 
         $fundResponse = $this->actingAs($user)->postJson('/api/fund-requests', [
@@ -186,7 +189,8 @@ class ErpWorkflowTest extends TestCase
 
     public function test_rab_import_validates_every_row_and_archives_replaced_data(): void
     {
-        User::factory()->create();
+        $user = User::factory()->create();
+        $this->actingAs($user, 'sanctum');
         $project = $this->project();
         $existing = $this->rab($project, 'DRAFT');
 
@@ -230,6 +234,7 @@ class ErpWorkflowTest extends TestCase
     public function test_partial_goods_receipt_updates_inventory_and_only_completes_po_when_all_items_arrive(): void
     {
         $user = User::factory()->create();
+        $this->actingAs($user, 'sanctum');
         $project = $this->project();
         $rab = $this->rab($project, 'APPROVED');
         $po = PurchaseOrder::create([

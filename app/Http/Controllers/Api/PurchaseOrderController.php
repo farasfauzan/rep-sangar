@@ -105,45 +105,54 @@ class PurchaseOrderController extends Controller
 
     public function submit(Request $request, $id)
     {
-        $po = PurchaseOrder::findOrFail($id);
-        WorkflowState::require(
-            $po->status,
-            ['DRAFT'],
-            'Hanya PO berstatus DRAFT yang dapat dikirim untuk approval.'
-        );
-        $po->update(['status' => 'PENDING_APPROVAL']);
-        $this->log($request, $po, 'SUBMIT');
+        $po = DB::transaction(function () use ($request, $id) {
+            $po = PurchaseOrder::lockForUpdate()->findOrFail($id);
+            WorkflowState::require(
+                $po->status,
+                ['DRAFT'],
+                'Hanya PO berstatus DRAFT yang dapat dikirim untuk approval.'
+            );
+            $po->update(['status' => 'PENDING_APPROVAL']);
+            $this->log($request, $po, 'SUBMIT');
+            return $po;
+        });
 
         return response()->json(['message' => 'PO dikirim untuk approval.', 'data' => $po]);
     }
 
     public function approve(Request $request, $id)
     {
-        $po = PurchaseOrder::findOrFail($id);
-        WorkflowState::require(
-            $po->status,
-            ['PENDING_APPROVAL'],
-            'PO harus berstatus PENDING_APPROVAL sebelum disetujui.'
-        );
-        $po->update([
-            'status' => 'APPROVED',
-            'approved_by' => $request->user()->id ?? 1,
-        ]);
-        $this->log($request, $po, 'APPROVE');
+        $po = DB::transaction(function () use ($request, $id) {
+            $po = PurchaseOrder::lockForUpdate()->findOrFail($id);
+            WorkflowState::require(
+                $po->status,
+                ['PENDING_APPROVAL'],
+                'PO harus berstatus PENDING_APPROVAL sebelum disetujui.'
+            );
+            $po->update([
+                'status' => 'APPROVED',
+                'approved_by' => $request->user()->id ?? 1,
+            ]);
+            $this->log($request, $po, 'APPROVE');
+            return $po;
+        });
 
         return response()->json(['message' => 'PO disetujui.', 'data' => $po]);
     }
 
     public function reject(Request $request, $id)
     {
-        $po = PurchaseOrder::findOrFail($id);
-        WorkflowState::require(
-            $po->status,
-            ['PENDING_APPROVAL'],
-            'PO harus berstatus PENDING_APPROVAL sebelum ditolak.'
-        );
-        $po->update(['status' => 'REJECTED']);
-        $this->log($request, $po, 'REJECT', $request->input('notes'));
+        $po = DB::transaction(function () use ($request, $id) {
+            $po = PurchaseOrder::lockForUpdate()->findOrFail($id);
+            WorkflowState::require(
+                $po->status,
+                ['PENDING_APPROVAL'],
+                'PO harus berstatus PENDING_APPROVAL sebelum ditolak.'
+            );
+            $po->update(['status' => 'REJECTED']);
+            $this->log($request, $po, 'REJECT', $request->input('notes'));
+            return $po;
+        });
 
         return response()->json(['message' => 'PO ditolak.', 'data' => $po]);
     }

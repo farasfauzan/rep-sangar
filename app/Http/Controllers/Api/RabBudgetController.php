@@ -165,11 +165,16 @@ class RabBudgetController extends Controller
             }
 
             // Execute synchronously
-            $currentMaxVersion = RabBudget::where('project_id', $projectId)->max('version') ?? 0;
-            $newVersion = $currentMaxVersion + 1;
             $batchSize = 200;
-            
-            $result = DB::transaction(function () use ($newItems, $projectId, $newVersion, $currentMaxVersion, $batchSize) {
+
+            $result = DB::transaction(function () use ($newItems, $projectId, $batchSize) {
+                // Hitung versi di dalam transaksi dengan lockForUpdate
+                // untuk mencegah race condition dual import yang menghasilkan versi sama.
+                $currentMaxVersion = RabBudget::where('project_id', $projectId)
+                    ->lockForUpdate()
+                    ->max('version') ?? 0;
+                $newVersion = $currentMaxVersion + 1;
+
                 $batch = [];
                 $imported = 0;
 

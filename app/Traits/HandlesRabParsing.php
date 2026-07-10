@@ -3,6 +3,7 @@
 namespace App\Traits;
 
 use App\Models\RabBudget;
+use App\Services\MimoAiService;
 use Illuminate\Support\Facades\Log;
 
 trait HandlesRabParsing
@@ -740,14 +741,21 @@ trait HandlesRabParsing
     }
 
     /**
-     * Call Gemini LLM to classify construction item.
+     * Call AI service (MiMo via OpenRouter or Gemini fallback) to classify construction item.
+     * Uses MimoAiService with built-in caching.
      */
     protected function classifyWithLLM(string $description): ?string
     {
-        $key = env('GEMINI_API_KEY');
-        if (!$key) return null;
-
         try {
+            $service = app(MimoAiService::class);
+            return $service->classify($description);
+        } catch (\Throwable $e) {
+            // Fallback to legacy env-based LLM if service not configured
+            $provider = strtolower(env('LLM_PROVIDER', ''));
+            $key = env('LLM_API_KEY') ?: env('GEMINI_API_KEY');
+            if (!$provider || !$key) return null;
+
+            $model = env('LLM_MODEL');
             $categories = [
                 'Pekerjaan Persiapan', 'Pekerjaan Tanah', 'Pekerjaan Pondasi',
                 'Pekerjaan Beton', 'Pekerjaan Batu', 'Pekerjaan Besi',
@@ -757,35 +765,33 @@ trait HandlesRabParsing
                 'Pekerjaan Bongkar', 'Pekerjaan Landscape', 'Pekerjaan Mebelair'
             ];
 
-            $response = \Illuminate\Support\Facades\Http::timeout(3)
-                ->post("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={$key}", [
-                    'contents' => [
-                        [
-                            'parts' => [
-                                [
-                                    'text' => "Klasifikasikan deskripsi pekerjaan konstruksi berikut ke salah satu kategori standar ini saja:\n" .
-                                              implode(", ", $categories) . "\n\n" .
-                                              "Deskripsi: \"{$description}\"\n\n" .
-                                              "Aturan: Kembalikan HANYA nama kategori yang paling cocok secara persis (case-sensitive) tanpa tanda baca, penjelasan, atau teks tambahan apapun. Jika ragu atau tidak ada yang cocok, kembalikan teks \"Lainnya\"."
-                                ]
-                            ]
-                        ]
-                    ]
-                ]);
+            $prompt = "Klasifikasikan deskripsi pekerjaan konstruksi berikut ke salah satu kategori standar ini saja:\n" .
+                      implode(", ", $categories) . "\n\n" .
+                      "Deskripsi: \"{$description}\"\n\n" .
+                      "Aturan: Kembalikan HANYA nama kategori yang paling cocok secara persis (case-sensitive) tanpa tanda baca, penjelasan, atau teks tambahan apapun. Jika ragu atau tidak ada yang cocok, kembalikan teks \"Lainnya\".";
 
-            if ($response->successful()) {
-                $text = trim($response->json('candidates.0.content.parts.0.text') ?? '');
-                foreach ($categories as $cat) {
-                    if (strcasecmp($text, $cat) === 0) {
-                        return $cat;
+            try {
+                if ($provider === 'gemini') {
+                    $model = $model ?: 'gemini-2.5-flash';
+                    $response = \Illuminate\Support\Facades\Http::timeout(3)
+                        ->post("https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$key}", [
+                            'contents' => [['parts' => [['text' => $prompt]]]]
+                        ]);
+                    if ($response->successful()) {
+                        $text = trim($response->json('candidates.0.content.parts.0.text') ?? '');
                     }
                 }
+                if (isset($text)) {
+                    foreach ($categories as $cat) {
+                        if (strcasecmp($text, $cat) === 0) return $cat;
+                    }
+                }
+            } catch (\Throwable $ex) {
+                // Silently fail
             }
-        } catch (\Throwable $e) {
-            // Silently fail and let the keyword scoring fallback take over
-        }
 
-        return null;
+            return null;
+        }
     }
 
     /**

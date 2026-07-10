@@ -35,4 +35,10 @@ return [
         ],
     ],
 
+    'mimo' => [
+        'api_key'  => env('MIMO_API_KEY'),
+        'base_url' => env('MIMO_BASE_URL', 'https://api.xiaomimimo.com/v1'),
+        'model'    => env('MIMO_MODEL', 'mimo-v2.5'),
+    ],
+
 ];

@@ -15,6 +15,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use App\Services\MimoAiService;
 
 class ExecuteRabImportJob implements ShouldQueue
 {
@@ -165,7 +166,29 @@ class ExecuteRabImportJob implements ShouldQueue
                 $job->update(['processed_rows' => $totalImported]);
             }
 
-            // 3. Remap references from old version to new version
+            // 3. AI classification for all new items
+            $mimo = app(MimoAiService::class);
+            if ($mimo->isConfigured()) {
+                $newItems = RabBudget::where('project_id', $projectId)
+                    ->where('version', $newVersion)
+                    ->whereNull('ai_category')
+                    ->get(['id', 'description']);
+
+                $descriptions = $newItems->pluck('description')->toArray();
+                $categories = $mimo->classifyBatch($descriptions);
+
+                foreach ($newItems as $i => $item) {
+                    if (($categories[$i] ?? null) !== null) {
+                        RabBudget::where('id', $item->id)->update(['ai_category' => $categories[$i]]);
+                    }
+                }
+                Log::info("AI classification done", [
+                    'classified' => count(array_filter($categories)),
+                    'total' => count($descriptions),
+                ]);
+            }
+
+            // 4. Remap references from old version to new version
             $oldActiveRabs = RabBudget::where('project_id', $projectId)
                 ->where('version', $currentMaxVersion)
                 ->get();
@@ -202,18 +225,21 @@ class ExecuteRabImportJob implements ShouldQueue
                 }
             }
 
-            // 4. Archive & soft-delete older version items
+            // 5. Archive & soft-delete older version items
             if ($currentMaxVersion > 0) {
-                RabBudget::where('project_id', $projectId)
+                // Use withTrashed to update status on rows we're about to soft-delete,
+                // so the audit trail keeps ARCHIVED even after deletion.
+                RabBudget::withTrashed()
+                    ->where('project_id', $projectId)
                     ->where('version', '<=', $currentMaxVersion)
-                    ->update(['status' => 'ARCHIVED']);
+                    ->update(['status' => RabBudget::STATUS_ARCHIVED]);
 
                 RabBudget::where('project_id', $projectId)
                     ->where('version', '<=', $currentMaxVersion)
                     ->delete(); // Soft delete
             }
 
-            // 5. Create inventory stocks for newly added RAB items
+            // 6. Create inventory stocks for newly added RAB items
             $existingStockRabs = InventoryStock::where('project_id', $projectId)
                 ->pluck('rab_budget_id')
                 ->filter()

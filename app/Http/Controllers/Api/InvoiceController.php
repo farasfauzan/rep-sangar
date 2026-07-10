@@ -104,43 +104,51 @@ class InvoiceController extends Controller
 
     public function verifyEngineer(Request $request, $id)
     {
-        $invoice = Invoice::findOrFail($id);
-        WorkflowState::require(
-            $invoice->status,
-            ['PENDING_ENGINEER'],
-            'Invoice harus berstatus PENDING_ENGINEER sebelum diverifikasi engineer.'
-        );
-        $invoice->update(['status' => 'ENGINEER_VERIFIED']);
-        $this->log($request, $invoice, 'ENGINEER_VERIFY');
+        $invoice = DB::transaction(function () use ($request, $id) {
+            $invoice = Invoice::query()->lockForUpdate()->findOrFail($id);
+            WorkflowState::require(
+                $invoice->status,
+                ['PENDING_ENGINEER'],
+                'Invoice harus berstatus PENDING_ENGINEER sebelum diverifikasi engineer.'
+            );
+            $invoice->update(['status' => 'ENGINEER_VERIFIED']);
+            $this->log($request, $invoice, 'ENGINEER_VERIFY');
+            return $invoice;
+        });
 
         return response()->json(['message' => 'Invoice lolos verifikasi engineer.', 'data' => $invoice]);
     }
 
     public function verifyFinance(Request $request, $id)
     {
-        $invoice = Invoice::findOrFail($id);
-        WorkflowState::require(
-            $invoice->status,
-            ['ENGINEER_VERIFIED'],
-            'Invoice harus lolos verifikasi engineer sebelum diverifikasi keuangan.'
-        );
-        $invoice->update(['status' => 'PENDING_APPROVAL']);
-        $this->log($request, $invoice, 'FINANCE_VERIFY');
+        $invoice = DB::transaction(function () use ($request, $id) {
+            $invoice = Invoice::query()->lockForUpdate()->findOrFail($id);
+            WorkflowState::require(
+                $invoice->status,
+                ['ENGINEER_VERIFIED'],
+                'Invoice harus lolos verifikasi engineer sebelum diverifikasi keuangan.'
+            );
+            $invoice->update(['status' => 'PENDING_APPROVAL']);
+            $this->log($request, $invoice, 'FINANCE_VERIFY');
+            return $invoice;
+        });
 
         return response()->json(['message' => 'Invoice lolos verifikasi finance dan menunggu approval manajer.', 'data' => $invoice]);
     }
 
     public function approveManager(Request $request, $id)
     {
-        $invoice = Invoice::findOrFail($id);
-        WorkflowState::require(
-            $invoice->status,
-            ['PENDING_APPROVAL'],
-            'Invoice harus lolos verifikasi keuangan sebelum disetujui manajer.'
-        );
-        $invoice->status = 'UNPAID'; // Approved, waiting for payment
-        $invoice->save();
-        $this->log($request, $invoice, 'MANAGER_APPROVE');
+        $invoice = DB::transaction(function () use ($request, $id) {
+            $invoice = Invoice::query()->lockForUpdate()->findOrFail($id);
+            WorkflowState::require(
+                $invoice->status,
+                ['PENDING_APPROVAL'],
+                'Invoice harus lolos verifikasi keuangan sebelum disetujui manajer.'
+            );
+            $invoice->update(['status' => 'UNPAID']);
+            $this->log($request, $invoice, 'MANAGER_APPROVE');
+            return $invoice;
+        });
 
         return response()->json([
             'message' => 'Invoice telah disetujui Manajer dan siap dibayar.',

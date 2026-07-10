@@ -13,7 +13,7 @@ class RabBudget extends Model
 
     protected $fillable = [
         'project_id', 'code_item', 'description', 'unit', 'volume',
-        'unit_price', 'total_price', 'category', 'status',
+        'unit_price', 'total_price', 'category', 'ai_category', 'status',
         'parent_id', 'approved_by', 'approved_at',
     ];
 
@@ -22,6 +22,7 @@ class RabBudget extends Model
     const STATUS_PENDING  = 'PENDING';
     const STATUS_APPROVED = 'APPROVED';
     const STATUS_REJECTED = 'REJECTED';
+    const STATUS_ARCHIVED = 'ARCHIVED';
 
     public function project()
     {
