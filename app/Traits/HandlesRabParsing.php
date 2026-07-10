@@ -445,6 +445,13 @@ trait HandlesRabParsing
             }
         }
 
+        // Adaptive Fallback: If 'volume' is missing but 'jumlah' is mapped alongside 'harga_satuan',
+        // the 'jumlah' column actually represents the item quantity/volume.
+        if (! isset($map['volume']) && isset($map['jumlah']) && isset($map['harga_satuan'])) {
+            $map['volume'] = $map['jumlah'];
+            unset($map['jumlah']);
+        }
+
         return $map;
     }
 
