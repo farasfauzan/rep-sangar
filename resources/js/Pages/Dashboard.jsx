@@ -2,6 +2,21 @@ import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head } from '@inertiajs/react';
 import { useState, useEffect, Component } from 'react';
 import axios from 'axios';
+import {
+    BarChart,
+    Bar,
+    XAxis,
+    YAxis,
+    Tooltip,
+    Legend,
+    ResponsiveContainer,
+    PieChart,
+    Pie,
+    Cell,
+    AreaChart,
+    Area,
+    CartesianGrid,
+} from 'recharts';
 
 class ErrorBoundary extends Component {
     constructor(props) {
@@ -29,8 +44,9 @@ class ErrorBoundary extends Component {
 }
 
 const fmt = (n) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(n ?? 0);
+const fmtCompact = (n) => new Intl.NumberFormat('id-ID', { notation: 'compact', maximumFractionDigits: 1 }).format(n ?? 0);
 
-/* ── classical baroque palette ── */
+/* ─ classical baroque palette ─ */
 const P = {
     parchment: '#f5e6cc',
     parchmentD: '#e8d4b0',
@@ -58,6 +74,8 @@ const P = {
     borderLight: '#dcc8a4',
     borderDark: '#a08050',
 };
+
+const chartColors = [P.gold, P.sienna, P.burgundy, P.olive, P.umberLight, P.goldLight, P.burgundyDeep, P.oliveDark];
 
 const cardStyle = {
     background: `linear-gradient(145deg, ${P.cream} 0%, ${P.creamWarm} 30%, ${P.parchment} 100%)`,
@@ -118,7 +136,7 @@ const btnSecondary = {
     boxShadow: `0 1px 4px ${P.shadow}`,
 };
 
-/* ── ornamental divider ── */
+/* ─ ornamental divider ─ */
 const OrnamentDivider = ({ width = 180 }) => (
     <svg width={width} height="16" viewBox={`0 0 ${width} 16`} style={{ display: 'block', margin: '0 auto' }}>
         <line x1="0" y1="8" x2={width * 0.35} y2="8" stroke={P.gold} strokeWidth="0.5" opacity="0.4" />
@@ -130,11 +148,15 @@ const OrnamentDivider = ({ width = 180 }) => (
     </svg>
 );
 
-/* ── classical frame corner ── */
+/* ─ classical frame corner ─ */
 const FrameCorner = ({ position }) => {
     const base = { position: 'absolute', width: '36px', height: '36px', opacity: 0.3, pointerEvents: 'none' };
-    const transforms = { tl: {}, tr: { transform: 'scaleX(-1)' }, bl: { transform: 'scaleY(-1)' }, br: { transform: 'scale(-1,-1)' } };
-    const positions = { tl: { top: 4, left: 4 }, tr: { top: 4, right: 4 }, bl: { bottom: 4, left: 4 }, br: { bottom: 4, right: 4 } };
+    const transforms = {
+        tl: {}, tr: { transform: 'scaleX(-1)' }, bl: { transform: 'scaleY(-1)' }, br: { transform: 'scale(-1,-1)' },
+    };
+    const positions = {
+        tl: { top: 4, left: 4 }, tr: { top: 4, right: 4 }, bl: { bottom: 4, left: 4 }, br: { bottom: 4, right: 4 },
+    };
     return (
         <svg style={{ ...base, ...positions[position], ...transforms[position] }} viewBox="0 0 32 32">
             <path d="M2 2 L2 28" stroke={P.gold} strokeWidth="1.5" fill="none" />
@@ -189,6 +211,7 @@ export default function Dashboard({ auth }) {
     const [importStatus, setImportStatus] = useState('');
     const [importErrors, setImportErrors] = useState([]);
     const [importDiff, setImportDiff] = useState(null);
+    const [importStartTime, setImportStartTime] = useState(null);
 
     const [showAddProjectModal, setShowAddProjectModal] = useState(false);
     const [newProjectName, setNewProjectName] = useState('');
@@ -196,10 +219,28 @@ export default function Dashboard({ auth }) {
     const [newProjectStartDate, setNewProjectStartDate] = useState('');
     const [addingProject, setAddingProject] = useState(false);
 
+    const [showEditProjectModal, setShowEditProjectModal] = useState(false);
+    const [editProjectName, setEditProjectName] = useState('');
+    const [editProjectLocation, setEditProjectLocation] = useState('');
+    const [editProjectStartDate, setEditProjectStartDate] = useState('');
+    const [editProjectStatus, setEditProjectStatus] = useState('planning');
+    const [savingProject, setSavingProject] = useState(false);
+
+    /* ─── Report state ─── */
+    const [execData, setExecData] = useState(null);
+    const [finData, setFinData] = useState(null);
+    const [projData, setProjData] = useState(null);
+    const [finRange, setFinRange] = useState('year');
+    const [projPage, setProjPage] = useState(1);
+    const [reportLoading, setReportLoading] = useState(false);
+
     const tabs = [
         { id: 'import', label: 'Import', icon: '📥' },
         { id: 'rab', label: 'Data RAB', icon: '📋' },
         { id: 'summary', label: 'Ringkasan', icon: '📊' },
+        { id: 'executive', label: 'Eksekutif', icon: '👑' },
+        { id: 'financial', label: 'Keuangan', icon: '💰' },
+        { id: 'projects', label: 'Proyek', icon: '🏗️' },
     ];
 
     const fetchRabData = async (pid) => {
@@ -208,9 +249,10 @@ export default function Dashboard({ auth }) {
         try {
             const params = { project_id: pid, per_page: -1 };
             const response = await axios.get('/api/rab', { params });
-            const result = response.data?.data;
-            const rows = Array.isArray(result) ? result : (result?.data ?? result ?? []);
-            setRabData(Array.isArray(rows) ? rows : []);
+            const payload = response.data;
+            const result = payload?.data;
+            const rows = Array.isArray(result) ? result : (Array.isArray(result?.data) ? result.data : (Array.isArray(payload) ? payload : []));
+            setRabData(rows);
         } catch (error) {
             console.error('Failed to fetch RAB data', error);
             setRabData([]);
@@ -223,9 +265,11 @@ export default function Dashboard({ auth }) {
         if (!pid) return;
         try {
             const response = await axios.get('/api/rab/summary', { params: { project_id: pid } });
-            setSummary(response.data.data);
-            const byCategory = response.data.data?.by_category ?? [];
-            const cats = Array.isArray(byCategory) ? byCategory.map(c => c.category_name) : [];
+            const payload = response.data;
+            const data = payload?.data ?? payload;
+            setSummary(data);
+            const byCategory = data?.by_category ?? [];
+            const cats = Array.isArray(byCategory) ? byCategory.map(c => c.category_name).filter(Boolean) : [];
             setCategories(cats);
         } catch { setSummary(null); }
     };
@@ -242,15 +286,69 @@ export default function Dashboard({ auth }) {
         fetchSummary(projectId);
     }, [projectId]);
 
+    /* ─── Fetch reports ─── */
+    const fetchExecutive = async () => {
+        setReportLoading(true);
+        try {
+            const res = await axios.get('/api/dashboard/executive', { params: { project_id: projectId > 0 ? projectId : undefined } });
+            setExecData(res.data?.data ?? null);
+        } catch (e) {
+            console.error('Executive report failed', e);
+            setExecData(null);
+        } finally { setReportLoading(false); }
+    };
+
+    const fetchFinancial = async () => {
+        setReportLoading(true);
+        try {
+            const res = await axios.get('/api/dashboard/financial', { params: { project_id: projectId > 0 ? projectId : undefined, range: finRange } });
+            setFinData(res.data?.data ?? null);
+        } catch (e) {
+            console.error('Financial report failed', e);
+            setFinData(null);
+        } finally { setReportLoading(false); }
+    };
+
+    const fetchProjects = async () => {
+        setReportLoading(true);
+        try {
+            const res = await axios.get('/api/dashboard/projects', { params: { project_id: projectId > 0 ? projectId : undefined, page: projPage, per_page: 10 } });
+            setProjData(res.data ?? null);
+        } catch (e) {
+            console.error('Project report failed', e);
+            setProjData(null);
+        } finally { setReportLoading(false); }
+    };
+
+    useEffect(() => {
+        if (activeTab === 'executive') fetchExecutive();
+        if (activeTab === 'financial') fetchFinancial();
+        if (activeTab === 'projects') fetchProjects();
+    }, [activeTab, projectId]);
+
+    useEffect(() => {
+        if (activeTab === 'financial') fetchFinancial();
+    }, [finRange]);
+
+    useEffect(() => {
+        if (activeTab === 'projects') fetchProjects();
+    }, [projPage]);
+
     const startPolling = (jobId) => {
         const interval = setInterval(async () => {
             try {
                 const response = await axios.get(`/rab/import-job/${jobId}`);
-                const job = response.data.data;
+                const job = response.data?.data ?? response.data;
                 setImportJob(job);
                 setImportStatus(job.status);
                 setImportErrors(job.errors || []);
                 setImportDiff(job.diff);
+
+                if (job.status === 'IMPORTING') {
+                    setImportStartTime(prev => prev || Date.now());
+                } else if (job.status !== 'PENDING' && job.status !== 'PROCESSING') {
+                    setImportStartTime(null);
+                }
 
                 if (job.status === 'VALIDATED' || job.status === 'FAILED' || job.status === 'COMPLETED') {
                     clearInterval(interval);
@@ -260,6 +358,7 @@ export default function Dashboard({ auth }) {
                     setMessage('Import data RAB berhasil diselesaikan! Stok inventory telah diperbarui.');
                     setFile(null);
                     setStep(1);
+                    setActiveTab('rab');
                     fetchRabData(projectId);
                     fetchSummary(projectId);
                 }
@@ -280,6 +379,7 @@ export default function Dashboard({ auth }) {
             setImportStatus('PENDING');
             setImportErrors([]);
             setImportDiff(null);
+            setImportStartTime(null);
 
             const formData = new FormData();
             formData.append('file', selectedFile);
@@ -287,12 +387,12 @@ export default function Dashboard({ auth }) {
 
             try {
                 const response = await axios.post('/rab/import-async', formData, {
-                    headers: { 
+                    headers: {
                         'Content-Type': 'multipart/form-data',
                         'Accept': 'application/json'
                     }
                 });
-                const job = response.data.data;
+                const job = response.data?.data ?? response.data;
                 setImportJob(job);
                 setImportStatus(job.status);
                 startPolling(job.id);
@@ -315,13 +415,15 @@ export default function Dashboard({ auth }) {
         try {
             setMessage('Memulai eksekusi import di background...');
             setImportStatus('IMPORTING');
+            setImportStartTime(Date.now());
             const response = await axios.post(`/rab/import-job/${importJob.id}/confirm`);
-            const job = response.data.data;
+            const job = response.data?.data ?? response.data;
             setImportJob(job);
             setImportStatus(job.status);
             startPolling(job.id);
         } catch (error) {
             setImportStatus('FAILED');
+            setImportStartTime(null);
             setImportErrors([error.response?.data?.message || 'Gagal memulai eksekusi import.']);
             setMessage('Gagal melakukan konfirmasi import.');
         }
@@ -340,7 +442,7 @@ export default function Dashboard({ auth }) {
                 location: newProjectLocation,
                 start_date: newProjectStartDate,
             });
-            const created = response.data.data;
+            const created = response.data;
             const updatedProjects = [...projects, created];
             setProjects(updatedProjects);
             setProjectId(created.id);
@@ -356,6 +458,39 @@ export default function Dashboard({ auth }) {
         }
     };
 
+    const openEditProjectModal = () => {
+        if (!currentProject) {
+            alert('Pilih proyek terlebih dahulu.');
+            return;
+        }
+        setEditProjectName(currentProject.project_name || '');
+        setEditProjectLocation(currentProject.location || '');
+        setEditProjectStartDate(currentProject.start_date || '');
+        setEditProjectStatus(currentProject.status || 'planning');
+        setShowEditProjectModal(true);
+    };
+
+    const handleEditProject = async (e) => {
+        if (e) e.preventDefault();
+        setSavingProject(true);
+        try {
+            const response = await axios.put(`/api/projects/${projectId}`, {
+                project_name: editProjectName,
+                location: editProjectLocation,
+                start_date: editProjectStartDate || null,
+                status: editProjectStatus,
+            });
+            const updated = response.data;
+            setProjects(prev => prev.map(p => p.id === projectId ? { ...p, ...updated } : p));
+            setShowEditProjectModal(false);
+            setMessage('Proyek berhasil diperbarui!');
+        } catch (error) {
+            alert(error.response?.data?.message || 'Gagal memperbarui proyek.');
+        } finally {
+            setSavingProject(false);
+        }
+    };
+
     const currentProject = projects.find(p => p.id === projectId);
     const projectName = currentProject?.project_name || `Project #${projectId}`;
 
@@ -368,6 +503,70 @@ export default function Dashboard({ auth }) {
         if (categoryFilter && item.category !== categoryFilter) return false;
         return true;
     });
+
+    // Calculate import progress details
+    const totalRows = importJob?.total_rows || 0;
+    const processedRows = importJob?.processed_rows || 0;
+    const percent = totalRows > 0 ? Math.min(100, Math.round((processedRows / totalRows) * 100)) : 0;
+
+    let remainingTimeText = '';
+    if (importStatus === 'IMPORTING' && importStartTime && processedRows > 0 && totalRows > 0) {
+        const elapsedMs = Date.now() - importStartTime;
+        if (elapsedMs > 500) {
+            const rowsPerMs = processedRows / elapsedMs;
+            const remainingRows = totalRows - processedRows;
+            const remainingMs = remainingRows / rowsPerMs;
+
+            if (remainingRows <= 0) {
+                remainingTimeText = 'Menyelesaikan proses import...';
+            } else {
+                const remainingSeconds = Math.ceil(remainingMs / 1000);
+                if (remainingSeconds < 60) {
+                    remainingTimeText = `Estimasi sisa waktu: ~${remainingSeconds} detik`;
+                } else {
+                    const remainingMinutes = Math.floor(remainingSeconds / 60);
+                    const remSec = remainingSeconds % 60;
+                    remainingTimeText = `Estimasi sisa waktu: ~${remainingMinutes} menit ${remSec} detik`;
+                }
+            }
+        }
+    } else if (importStatus === 'IMPORTING') {
+        remainingTimeText = 'Menghitung sisa waktu...';
+    }
+
+    /* ─── Report helpers ─── */
+    const statusColor = (status) => {
+        const s = String(status).toLowerCase();
+        if (s === 'completed') return P.olive;
+        if (s === 'active') return P.gold;
+        if (s === 'planning') return P.goldLight;
+        if (s === 'on_hold') return P.textLight;
+        if (s === 'cancelled') return P.border;
+        return P.sienna;
+    };
+
+    const KpiCard = ({ label, value, sub, accent = P.gold, accentDark = P.goldDark, icon }) => (
+        <div style={{ ...cardStyle, padding: '1.1rem 1.25rem', overflow: 'hidden' }}>
+            <CartoucheFrame />
+            <div style={{ position: 'absolute', top: 0, left: 0, width: '5px', height: '100%', background: `linear-gradient(180deg, ${accent} 0%, ${accentDark} 50%, ${accent} 100%)`, boxShadow: `1px 0 4px ${P.shadow}` }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', position: 'relative' }}>
+                {icon && (
+                    <div style={{ width: '42px', height: '42px', borderRadius: '50%', background: `linear-gradient(145deg, ${P.cream} 0%, ${P.parchment} 100%)`, display: 'flex', alignItems: 'center', justifyContent: 'center', border: `2px solid ${accent}40`, boxShadow: `0 3px 10px ${P.shadow}`, fontSize: '1.1rem' }}>{icon}</div>
+                )}
+                <div style={{ minWidth: 0 }}>
+                    <p style={{ ...sectionTitle, marginBottom: '0.25rem' }}>{label}</p>
+                    <p style={{ fontSize: '1.1rem', fontWeight: 800, color: P.umber, fontFamily: 'Georgia, serif', lineHeight: 1.2 }}>{value}</p>
+                    {sub && <p style={{ fontSize: '0.72rem', color: P.textMuted, marginTop: '2px' }}>{sub}</p>}
+                </div>
+            </div>
+        </div>
+    );
+
+    const EmptyReport = ({ text = 'Belum ada data untuk laporan ini.' }) => (
+        <div style={{ ...cardStyle, padding: '3rem', textAlign: 'center' }}>
+            <p style={{ fontSize: '0.9rem', color: P.textMuted, fontStyle: 'italic', fontFamily: 'Georgia, serif' }}>{text}</p>
+        </div>
+    );
 
     return (
         <ErrorBoundary>
@@ -402,7 +601,7 @@ export default function Dashboard({ auth }) {
                         display: 'flex', flexDirection: 'column', gap: '1.5rem',
                     }}>
 
-                        {/* ════════ PROJECT TITLE BANNER ════════ */}
+                        {/* ════ PROJECT TITLE BANNER ════ */}
                         <div style={{ textAlign: 'center', padding: '0.5rem 2rem 0.25rem' }}>
                             <h2 style={{
                                 fontSize: '1.2rem', fontWeight: 700, color: P.umber,
@@ -410,10 +609,81 @@ export default function Dashboard({ auth }) {
                             }}>
                                 {projectName}
                             </h2>
+                            {currentProject?.location && (
+                                <p style={{ fontSize: '0.75rem', color: P.textMuted, marginTop: '2px', fontStyle: 'italic' }}>
+                                    📍 {currentProject.location}
+                                </p>
+                            )}
                             <OrnamentDivider width={220} />
                         </div>
 
-                        {/* ════════ TAB: IMPORT ════════ */}
+                        {/* STORAGE INFO BANNER */}
+                        <div style={{
+                            padding: '0.6rem 1rem',
+                            background: `linear-gradient(135deg, ${P.goldBg} 0%, ${P.creamWarm} 100%)`,
+                            border: `1px solid ${P.gold}40`,
+                            borderRadius: '3px',
+                            fontSize: '0.72rem',
+                            color: P.textMuted,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            flexWrap: 'wrap',
+                        }}>
+                            <span style={{ fontWeight: 700, color: P.siennaDeep }}>💾 Penyimpanan:</span>
+                            <span>File RAB disimpan di <code style={{ background: P.parchment, padding: '1px 5px', borderRadius: '2px', fontFamily: 'monospace', fontSize: '0.68rem', color: P.umber }}>storage/app/rab-imports/</code></span>
+                            <span style={{ color: P.border }}>•</span>
+                            <span>Data tersimpan di tabel <code style={{ background: P.parchment, padding: '1px 5px', borderRadius: '2px', fontFamily: 'monospace', fontSize: '0.68rem', color: P.umber }}>rab_budgets</code></span>
+                        </div>
+
+                        {/* PROJECT LIST PANEL */}
+                        {projects.length > 0 && (
+                            <div style={{ ...cardStyle, overflow: 'hidden' }}>
+                                <CartoucheFrame />
+                                <div style={{
+                                    padding: '0.6rem 1.25rem',
+                                    background: `linear-gradient(135deg, ${P.umberLight} 0%, ${P.siennaDeep} 100%)`,
+                                    borderBottom: `2px solid ${P.goldDark}`,
+                                    display: 'flex', alignItems: 'center', gap: '0.5rem',
+                                }}>
+                                    <span style={{ fontSize: '0.85rem' }}>📁</span>
+                                    <h3 style={{ fontSize: '0.85rem', fontWeight: 700, color: '#fef0d8', fontFamily: 'Georgia, serif', letterSpacing: '0.03em' }}>
+                                        Daftar Proyek ({projects.length})
+                                    </h3>
+                                </div>
+                                <div style={{ padding: '0.75rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                    {projects.map(p => (
+                                        <button
+                                            key={p.id}
+                                            onClick={() => setProjectId(p.id)}
+                                            style={{
+                                                padding: '0.5rem 0.85rem',
+                                                background: p.id === projectId
+                                                    ? `linear-gradient(135deg, ${P.gold} 0%, ${P.goldDark} 100%)`
+                                                    : `linear-gradient(135deg, ${P.cream} 0%, ${P.parchment} 100%)`,
+                                                color: p.id === projectId ? '#fef0d8' : P.text,
+                                                border: `1.5px solid ${p.id === projectId ? P.goldDark : P.border}`,
+                                                borderRadius: '3px',
+                                                cursor: 'pointer',
+                                                fontSize: '0.78rem',
+                                                fontWeight: p.id === projectId ? 700 : 500,
+                                                transition: 'all 0.2s',
+                                                boxShadow: p.id === projectId ? `0 2px 8px rgba(196,148,42,0.4)` : 'none',
+                                                display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '2px',
+                                                minWidth: '160px',
+                                            }}
+                                        >
+                                            <span>{p.project_name || `Project #${p.id}`}</span>
+                                            {p.location && (
+                                                <span style={{ fontSize: '0.65rem', opacity: 0.8, fontStyle: 'italic' }}>📍 {p.location}</span>
+                                            )}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ════ TAB: IMPORT ════ */}
                         {activeTab === 'import' && (
                             <div style={{ ...cardStyle, overflow: 'hidden' }}>
                                 <CartoucheFrame />
@@ -458,6 +728,9 @@ export default function Dashboard({ auth }) {
                                                 </select>
                                                 <button type="button" onClick={() => setShowAddProjectModal(true)} style={{ ...btnSecondary, padding: '0.45rem 0.65rem', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '34px' }} title="Tambah Proyek Baru">
                                                     ➕
+                                                </button>
+                                                <button type="button" onClick={openEditProjectModal} style={{ ...btnSecondary, padding: '0.45rem 0.65rem', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '34px' }} title="Edit Proyek Terpilih">
+                                                    ✏️
                                                 </button>
                                             </div>
                                         </div>
@@ -542,11 +815,18 @@ export default function Dashboard({ auth }) {
                                                         <span>Memasukkan data ke database...</span>
                                                     </div>
                                                     <div style={{ height: '8px', background: P.parchmentD, borderRadius: '4px', overflow: 'hidden', position: 'relative' }}>
-                                                        <div style={{ height: '100%', background: P.burgundy, width: `${importJob ? Math.min(100, Math.round((importJob.processed_rows / importJob.total_rows) * 100)) : 0}%`, transition: 'width 0.3s ease' }} />
+                                                        <div style={{ height: '100%', background: P.burgundy, width: `${percent}%`, transition: 'width 0.3s ease' }} />
                                                     </div>
-                                                    <span style={{ fontSize: '0.68rem', color: P.textMuted, marginTop: '4px', display: 'block' }}>
-                                                        Memproses {importJob.processed_rows} dari {importJob.total_rows} baris...
-                                                    </span>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', color: P.textMuted, marginTop: '4px', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                                        <span>
+                                                            Memproses {processedRows} dari {totalRows} baris ({percent}%)
+                                                        </span>
+                                                        {remainingTimeText && (
+                                                            <span style={{ fontWeight: 600, color: P.sienna }}>
+                                                                {remainingTimeText}
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             )}
                                         </div>
@@ -555,7 +835,7 @@ export default function Dashboard({ auth }) {
                             </div>
                         )}
 
-                        {/* ════════ TAB: DATA RAB ════════ */}
+                        {/* ════ TAB: DATA RAB ════ */}
                         {activeTab === 'rab' && (
                             <div id="print-section" style={{ ...cardStyle, overflow: 'hidden' }}>
                                 <CartoucheFrame />
@@ -656,7 +936,7 @@ export default function Dashboard({ auth }) {
                             </div>
                         )}
 
-                        {/* ════════ TAB: SUMMARY ════════ */}
+                        {/* ════ TAB: SUMMARY ════ */}
                         {activeTab === 'summary' && summary && summary.total_items > 0 && (
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '1.25rem' }}>
                                 {[
@@ -686,20 +966,26 @@ export default function Dashboard({ auth }) {
                                     </div>
                                 ))}
                                 {/* category breakdown */}
-                                {summary.by_category && Object.keys(summary.by_category).length > 0 && (
-                                    <div style={{ ...cardStyle, padding: '1.25rem 1.5rem', gridColumn: '1 / -1' }}>
-                                        <CartoucheFrame />
-                                        <h4 style={{ fontSize: '0.85rem', fontWeight: 700, color: P.umber, fontFamily: 'Georgia, serif', marginBottom: '0.75rem' }}>Rincian per Kategori</h4>
-                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '0.65rem' }}>
-                                            {Object.entries(summary.by_category).map(([cat, data]) => (
-                                                <div key={cat} style={{ padding: '0.6rem 0.85rem', background: `linear-gradient(135deg, ${P.goldBg}, ${P.parchment})`, border: `1px solid ${P.gold}30`, borderRadius: '3px' }}>
-                                                    <p style={{ fontSize: '0.75rem', fontWeight: 700, color: P.siennaDeep }}>{cat}</p>
-                                                    <p style={{ fontSize: '0.68rem', color: P.textMuted }}>{data.count ?? data.total_items ?? 0} item — {fmt(data.total ?? data.total_budget ?? 0)}</p>
-                                                </div>
-                                            ))}
+                                {(() => {
+                                    const catList = Array.isArray(summary.by_category)
+                                        ? summary.by_category
+                                        : Object.entries(summary.by_category || {}).map(([cat, data]) => ({ category_name: cat, ...(typeof data === 'object' ? data : {}) }));
+                                    if (catList.length === 0) return null;
+                                    return (
+                                        <div style={{ ...cardStyle, padding: '1.25rem 1.5rem', gridColumn: '1 / -1' }}>
+                                            <CartoucheFrame />
+                                            <h4 style={{ fontSize: '0.85rem', fontWeight: 700, color: P.umber, fontFamily: 'Georgia, serif', marginBottom: '0.75rem' }}>Rincian per Kategori</h4>
+                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '0.65rem' }}>
+                                                {catList.map((c, i) => (
+                                                    <div key={c.category_name || i} style={{ padding: '0.6rem 0.85rem', background: `linear-gradient(135deg, ${P.goldBg}, ${P.parchment})`, border: `1px solid ${P.gold}30`, borderRadius: '3px' }}>
+                                                        <p style={{ fontSize: '0.75rem', fontWeight: 700, color: P.siennaDeep }}>{c.category_name || 'Umum'}</p>
+                                                        <p style={{ fontSize: '0.68rem', color: P.textMuted }}>{c.count ?? 0} item — {fmt(c.total ?? 0)}</p>
+                                                    </div>
+                                                ))}
+                                            </div>
                                         </div>
-                                    </div>
-                                )}
+                                    );
+                                })()}
                             </div>
                         )}
                         {activeTab === 'summary' && (!summary || summary.total_items === 0) && (
@@ -707,10 +993,238 @@ export default function Dashboard({ auth }) {
                                 <p style={{ fontSize: '0.9rem', color: P.textMuted, fontStyle: 'italic', fontFamily: 'Georgia, serif' }}>Belum ada data ringkasan.</p>
                             </div>
                         )}
+
+                        {/* ════ TAB: EXECUTIVE ════ */}
+                        {activeTab === 'executive' && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                                {reportLoading && !execData ? (
+                                    <div style={{ ...cardStyle, padding: '3rem', textAlign: 'center' }}>
+                                        <svg style={{ animation: 'spin 1s linear infinite', width: '28px', height: '28px', color: P.gold, margin: '0 auto 0.75rem' }} viewBox="0 0 24 24"><circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                                        <p style={{ fontSize: '0.85rem', color: P.textMuted, fontStyle: 'italic' }}>Memuat ringkasan eksekutif...</p>
+                                    </div>
+                                ) : execData ? (
+                                    <>
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+                                            <KpiCard label="Total Anggaran" value={fmt(execData.total_budget)} icon="💼" accent={P.gold} accentDark={P.goldDark} />
+                                            <KpiCard label="Total Komitmen" value={fmt(execData.total_commitment)} sub={`${execData.total_budget > 0 ? Math.round((execData.total_commitment / execData.total_budget) * 100) : 0}% dari anggaran`} icon="📜" accent={P.sienna} accentDark={P.siennaDeep} />
+                                            <KpiCard label="Total Difaktur" value={fmt(execData.total_invoiced)} icon="🧾" accent={P.burgundy} accentDark={P.burgundyDeep} />
+                                            <KpiCard label="Total Dibayar" value={fmt(execData.total_paid)} icon="💳" accent={P.olive} accentDark={P.oliveDark} />
+                                            <KpiCard label="Permohonan Dana" value={fmt(execData.total_fund_requests)} icon="🏦" accent={P.goldLight} accentDark={P.goldDark} />
+                                            <KpiCard label="Menunggu Persetujuan" value={execData.pending_approvals} icon="⏳" accent={P.umberLight} accentDark={P.umber} />
+                                            <KpiCard label="Jumlah Proyek" value={execData.project_count} icon="🏛️" accent={P.gold} accentDark={P.goldDark} />
+                                            <KpiCard label="Item RAB" value={execData.rab_item_count} icon="📐" accent={P.sienna} accentDark={P.siennaDeep} />
+                                        </div>
+
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem' }}>
+                                            <div style={{ ...cardStyle, padding: '1.25rem', minHeight: '320px' }}>
+                                                <CartoucheFrame />
+                                                <h4 style={{ fontSize: '0.85rem', fontWeight: 700, color: P.umber, fontFamily: 'Georgia, serif', marginBottom: '1rem' }}>Distribusi Anggaran per Kategori</h4>
+                                                <div style={{ height: 240 }}>
+                                                    <ResponsiveContainer width="100%" height="100%">
+                                                        <BarChart data={execData.by_category || []} layout="vertical" margin={{ left: 20, right: 30, top: 5, bottom: 5 }}>
+                                                            <CartesianGrid strokeDasharray="3 3" stroke={P.borderLight} />
+                                                            <XAxis type="number" tickFormatter={(v) => fmtCompact(v)} stroke={P.textMuted} fontSize={11} />
+                                                            <YAxis type="category" dataKey="category_name" width={100} stroke={P.textMuted} fontSize={11} />
+                                                            <Tooltip formatter={(v) => fmt(v)} contentStyle={{ background: P.cream, border: `1px solid ${P.border}`, borderRadius: 4 }} />
+                                                            <Bar dataKey="total" name="Anggaran" fill={P.gold} radius={[0, 4, 4, 0]} />
+                                                        </BarChart>
+                                                    </ResponsiveContainer>
+                                                </div>
+                                            </div>
+
+                                            <div style={{ ...cardStyle, padding: '1.25rem', minHeight: '320px' }}>
+                                                <CartoucheFrame />
+                                                <h4 style={{ fontSize: '0.85rem', fontWeight: 700, color: P.umber, fontFamily: 'Georgia, serif', marginBottom: '1rem' }}>Status Proyek</h4>
+                                                <div style={{ height: 240 }}>
+                                                    <ResponsiveContainer width="100%" height="100%">
+                                                        <PieChart>
+                                                            <Pie
+                                                                data={execData.project_status || []}
+                                                                dataKey="count"
+                                                                nameKey="status"
+                                                                cx="50%"
+                                                                cy="50%"
+                                                                outerRadius={80}
+                                                                label={({ status, count }) => `${status}: ${count}`}
+                                                                labelLine={false}
+                                                            >
+                                                                {(execData.project_status || []).map((entry, i) => (
+                                                                    <Cell key={`cell-${i}`} fill={statusColor(entry.status)} />
+                                                                ))}
+                                                            </Pie>
+                                                            <Tooltip contentStyle={{ background: P.cream, border: `1px solid ${P.border}`, borderRadius: 4 }} />
+                                                        </PieChart>
+                                                    </ResponsiveContainer>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </>
+                                ) : (
+                                    <EmptyReport text="Data eksekutif tidak tersedia." />
+                                )}
+                            </div>
+                        )}
+
+                        {/* ════ TAB: FINANCIAL ════ */}
+                        {activeTab === 'financial' && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                                <div style={{ ...cardStyle, padding: '0.75rem 1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
+                                    <span style={{ fontSize: '0.82rem', fontWeight: 700, color: P.umber, fontFamily: 'Georgia, serif' }}>Rentang Waktu</span>
+                                    <select value={finRange} onChange={(e) => setFinRange(e.target.value)} style={{ ...inputBase, cursor: 'pointer', minWidth: '150px' }}>
+                                        <option value="year">12 Bulan Terakhir</option>
+                                        <option value="quarter">Per Triwulan</option>
+                                        <option value="month">30 Hari Terakhir</option>
+                                    </select>
+                                </div>
+
+                                {reportLoading && !finData ? (
+                                    <div style={{ ...cardStyle, padding: '3rem', textAlign: 'center' }}>
+                                        <svg style={{ animation: 'spin 1s linear infinite', width: '28px', height: '28px', color: P.gold, margin: '0 auto 0.75rem' }} viewBox="0 0 24 24"><circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                                        <p style={{ fontSize: '0.85rem', color: P.textMuted, fontStyle: 'italic' }}>Memuat laporan keuangan...</p>
+                                    </div>
+                                ) : finData ? (
+                                    <>
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+                                            <KpiCard label="Anggaran" value={fmt(finData.summary?.budget)} icon="💼" accent={P.gold} accentDark={P.goldDark} />
+                                            <KpiCard label="Komitmen" value={fmt(finData.summary?.committed)} sub={`${finData.summary?.commitment_percentage ?? 0}%`} icon="📜" accent={P.sienna} accentDark={P.siennaDeep} />
+                                            <KpiCard label="Dibayar" value={fmt(finData.summary?.paid)} sub={`${finData.summary?.realization_percentage ?? 0}% realisasi`} icon="💳" accent={P.olive} accentDark={P.oliveDark} />
+                                            <KpiCard label="Sisa Anggaran" value={fmt(finData.summary?.remaining_budget)} icon="🛡️" accent={P.umberLight} accentDark={P.umber} />
+                                            <KpiCard label="Dana Diminta" value={fmt(finData.fund_request?.requested)} icon="🏦" accent={P.burgundy} accentDark={P.burgundyDeep} />
+                                            <KpiCard label="Dana Cair" value={fmt(finData.fund_request?.paid)} icon="💸" accent={P.goldLight} accentDark={P.goldDark} />
+                                        </div>
+
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem' }}>
+                                            <div style={{ ...cardStyle, padding: '1.25rem', minHeight: '320px' }}>
+                                                <CartoucheFrame />
+                                                <h4 style={{ fontSize: '0.85rem', fontWeight: 700, color: P.umber, fontFamily: 'Georgia, serif', marginBottom: '1rem' }}>Realisasi Anggaran</h4>
+                                                <div style={{ height: 240 }}>
+                                                    <ResponsiveContainer width="100%" height="100%">
+                                                        <BarChart data={[
+                                                            { name: 'Anggaran', value: finData.summary?.budget ?? 0, fill: P.gold },
+                                                            { name: 'Komitmen', value: finData.summary?.committed ?? 0, fill: P.sienna },
+                                                            { name: 'Dibayar', value: finData.summary?.paid ?? 0, fill: P.olive },
+                                                            { name: 'Sisa', value: finData.summary?.remaining_budget ?? 0, fill: P.umberLight },
+                                                        ]} layout="vertical" margin={{ left: 20, right: 30, top: 5, bottom: 5 }}>
+                                                            <CartesianGrid strokeDasharray="3 3" stroke={P.borderLight} />
+                                                            <XAxis type="number" tickFormatter={(v) => fmtCompact(v)} stroke={P.textMuted} fontSize={11} />
+                                                            <YAxis type="category" dataKey="name" width={70} stroke={P.textMuted} fontSize={11} />
+                                                            <Tooltip formatter={(v) => fmt(v)} contentStyle={{ background: P.cream, border: `1px solid ${P.border}`, borderRadius: 4 }} />
+                                                            <Bar dataKey="value" radius={[0, 4, 4, 0]} />
+                                                        </BarChart>
+                                                    </ResponsiveContainer>
+                                                </div>
+                                            </div>
+
+                                            <div style={{ ...cardStyle, padding: '1.25rem', minHeight: '320px' }}>
+                                                <CartoucheFrame />
+                                                <h4 style={{ fontSize: '0.85rem', fontWeight: 700, color: P.umber, fontFamily: 'Georgia, serif', marginBottom: '1rem' }}>Arus Kas</h4>
+                                                <div style={{ height: 240 }}>
+                                                    <ResponsiveContainer width="100%" height="100%">
+                                                        <AreaChart data={finData.cashflow || []} margin={{ left: 5, right: 20, top: 5, bottom: 5 }}>
+                                                            <defs>
+                                                                <linearGradient id="colorPaid" x1="0" y1="0" x2="0" y2="1">
+                                                                    <stop offset="5%" stopColor={P.olive} stopOpacity={0.35} />
+                                                                    <stop offset="95%" stopColor={P.olive} stopOpacity={0.05} />
+                                                                </linearGradient>
+                                                                <linearGradient id="colorCommitted" x1="0" y1="0" x2="0" y2="1">
+                                                                    <stop offset="5%" stopColor={P.sienna} stopOpacity={0.35} />
+                                                                    <stop offset="95%" stopColor={P.sienna} stopOpacity={0.05} />
+                                                                </linearGradient>
+                                                            </defs>
+                                                            <CartesianGrid strokeDasharray="3 3" stroke={P.borderLight} />
+                                                            <XAxis dataKey="period" stroke={P.textMuted} fontSize={10} angle={-30} textAnchor="end" height={50} />
+                                                            <YAxis tickFormatter={(v) => fmtCompact(v)} stroke={P.textMuted} fontSize={11} />
+                                                            <Tooltip formatter={(v) => fmt(v)} contentStyle={{ background: P.cream, border: `1px solid ${P.border}`, borderRadius: 4 }} />
+                                                            <Legend />
+                                                            <Area type="monotone" dataKey="paid" name="Dibayar" stroke={P.olive} fillOpacity={1} fill="url(#colorPaid)" strokeWidth={2} />
+                                                            <Area type="monotone" dataKey="committed" name="Komitmen" stroke={P.sienna} fillOpacity={1} fill="url(#colorCommitted)" strokeWidth={2} />
+                                                        </AreaChart>
+                                                    </ResponsiveContainer>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </>
+                                ) : (
+                                    <EmptyReport text="Data keuangan tidak tersedia." />
+                                )}
+                            </div>
+                        )}
+
+                        {/* ════ TAB: PROJECTS ════ */}
+                        {activeTab === 'projects' && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                                {reportLoading && !projData ? (
+                                    <div style={{ ...cardStyle, padding: '3rem', textAlign: 'center' }}>
+                                        <svg style={{ animation: 'spin 1s linear infinite', width: '28px', height: '28px', color: P.gold, margin: '0 auto 0.75rem' }} viewBox="0 0 24 24"><circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                                        <p style={{ fontSize: '0.85rem', color: P.textMuted, fontStyle: 'italic' }}>Memuat laporan proyek...</p>
+                                    </div>
+                                ) : projData?.data?.length > 0 ? (
+                                    <>
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.25rem' }}>
+                                            {projData.data.map((p) => (
+                                                <div key={p.id} style={{ ...cardStyle, padding: '1.25rem', overflow: 'hidden' }}>
+                                                    <CartoucheFrame />
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
+                                                        <div>
+                                                            <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: P.umber, fontFamily: 'Georgia, serif' }}>{p.project_name}</h4>
+                                                            <p style={{ fontSize: '0.72rem', color: P.textMuted, fontStyle: 'italic' }}>📍 {p.location || '—'}</p>
+                                                        </div>
+                                                        <span style={{ padding: '0.15rem 0.5rem', borderRadius: '2px', fontSize: '0.65rem', fontWeight: 700, color: '#fef0d8', background: statusColor(p.status), border: `1px solid ${statusColor(p.status)}` }}>
+                                                            {p.status}
+                                                        </span>
+                                                    </div>
+                                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.72rem', marginBottom: '0.75rem' }}>
+                                                        <div style={{ background: P.goldBg, padding: '0.5rem', borderRadius: '3px', border: `1px solid ${P.gold}30` }}>
+                                                            <p style={{ color: P.textMuted }}>Anggaran</p>
+                                                            <p style={{ fontWeight: 700, color: P.umber }}>{fmt(p.budget)}</p>
+                                                        </div>
+                                                        <div style={{ background: P.goldBg, padding: '0.5rem', borderRadius: '3px', border: `1px solid ${P.gold}30` }}>
+                                                            <p style={{ color: P.textMuted }}>Komitmen</p>
+                                                            <p style={{ fontWeight: 700, color: P.sienna }}>{fmt(p.commitment)}</p>
+                                                        </div>
+                                                        <div style={{ background: P.goldBg, padding: '0.5rem', borderRadius: '3px', border: `1px solid ${P.gold}30` }}>
+                                                            <p style={{ color: P.textMuted }}>Dibayar</p>
+                                                            <p style={{ fontWeight: 700, color: P.olive }}>{fmt(p.paid)}</p>
+                                                        </div>
+                                                        <div style={{ background: P.goldBg, padding: '0.5rem', borderRadius: '3px', border: `1px solid ${P.gold}30` }}>
+                                                            <p style={{ color: P.textMuted }}>Sisa</p>
+                                                            <p style={{ fontWeight: 700, color: P.umberLight }}>{fmt(p.remaining_budget)}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div style={{ marginBottom: '0.5rem' }}>
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: P.textMuted, marginBottom: '4px' }}>
+                                                            <span>Progress Fisik</span>
+                                                            <span>{p.progress_percentage}%</span>
+                                                        </div>
+                                                        <div style={{ height: '8px', background: P.parchmentD, borderRadius: '4px', overflow: 'hidden' }}>
+                                                            <div style={{ height: '100%', background: `linear-gradient(90deg, ${P.gold}, ${P.goldDark})`, width: `${Math.min(100, p.progress_percentage)}%`, transition: 'width 0.3s ease' }} />
+                                                        </div>
+                                                    </div>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', color: P.textMuted }}>
+                                                        <span>Realisasi: {p.realization_percentage}%</span>
+                                                        <span>Komitmen: {p.commitment_percentage}%</span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+
+                                        {projData.meta && projData.meta.last_page > 1 && (
+                                            <div style={{ ...cardStyle, padding: '0.75rem 1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                                <button onClick={() => setProjPage(p => Math.max(1, p - 1))} disabled={projPage <= 1} style={{ ...btnSecondary, opacity: projPage <= 1 ? 0.6 : 1 }}>← Sebelumnya</button>
+                                                <span style={{ fontSize: '0.78rem', color: P.textMuted, fontWeight: 600 }}>Halaman {projPage} dari {projData.meta.last_page}</span>
+                                                <button onClick={() => setProjPage(p => Math.min(projData.meta.last_page, p + 1))} disabled={projPage >= projData.meta.last_page} style={{ ...btnSecondary, opacity: projPage >= projData.meta.last_page ? 0.6 : 1 }}>Berikutnya →</button>
+                                            </div>
+                                        )}
+                                    </>
+                                ) : (
+                                    <EmptyReport text="Belum ada data proyek untuk ditampilkan." />
+                                )}
+                            </div>
+                        )}
                     </div>
                 </div>
 
-                {/* ════════ EXCEL-STYLE BOTTOM SHEET TABS ════════ */}
+                {/* ════ EXCEL-STYLE BOTTOM SHEET TABS ════ */}
                 <div style={{
                     position: 'fixed', bottom: 0, left: '256px', right: 0, zIndex: 9999,
                     height: '44px',
@@ -771,45 +1285,95 @@ export default function Dashboard({ auth }) {
                     }}>+</button>
                 </div>
 
-            {showAddProjectModal && (
-                <div style={{
-                    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-                    backgroundColor: 'rgba(0, 0, 0, 0.5)', display: 'flex',
-                    alignItems: 'center', justifyContent: 'center', zIndex: 1000,
-                    backdropFilter: 'blur(4px)'
-                }}>
+                {showAddProjectModal && (
                     <div style={{
-                        ...cardStyle, width: '400px', padding: '1.5rem',
-                        position: 'relative', background: P.cream, border: `2px solid ${P.goldDark}`,
-                        boxShadow: `0 10px 25px rgba(0,0,0,0.3)`
+                        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                        backgroundColor: 'rgba(0, 0, 0, 0.5)', display: 'flex',
+                        alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+                        backdropFilter: 'blur(4px)'
                     }}>
-                        <CartoucheFrame />
-                        <h3 style={{ fontSize: '1rem', fontWeight: 700, color: P.umber, fontFamily: 'Georgia, serif', marginBottom: '1rem', borderBottom: `1.5px solid ${P.border}`, paddingBottom: '0.5rem' }}>
-                            Tambah Proyek Baru
-                        </h3>
-                        <form onSubmit={handleAddProject} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                                <label style={sectionTitle}>Nama Proyek</label>
-                                <input type="text" placeholder="Masukkan nama proyek..." value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} style={inputBase} required />
-                            </div>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                                <label style={sectionTitle}>Lokasi</label>
-                                <input type="text" placeholder="Masukkan lokasi proyek..." value={newProjectLocation} onChange={(e) => setNewProjectLocation(e.target.value)} style={inputBase} required />
-                            </div>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                                <label style={sectionTitle}>Tanggal Mulai</label>
-                                <input type="date" value={newProjectStartDate} onChange={(e) => setNewProjectStartDate(e.target.value)} style={inputBase} required />
-                            </div>
-                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '0.75rem' }}>
-                                <button type="button" onClick={() => setShowAddProjectModal(false)} style={btnSecondary}>Batal</button>
-                                <button type="submit" disabled={addingProject} style={btnPrimary}>
-                                    {addingProject ? 'Menyimpan...' : 'Simpan Proyek'}
-                                </button>
-                            </div>
-                        </form>
+                        <div style={{
+                            ...cardStyle, width: '400px', padding: '1.5rem',
+                            position: 'relative', background: P.cream, border: `2px solid ${P.goldDark}`,
+                            boxShadow: `0 10px 25px rgba(0,0,0,0.3)`
+                        }}>
+                            <CartoucheFrame />
+                            <h3 style={{ fontSize: '1rem', fontWeight: 700, color: P.umber, fontFamily: 'Georgia, serif', marginBottom: '1rem', borderBottom: `1.5px solid ${P.border}`, paddingBottom: '0.5rem' }}>
+                                Tambah Proyek Baru
+                            </h3>
+                            <form onSubmit={handleAddProject} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                    <label style={sectionTitle}>Nama Proyek</label>
+                                    <input type="text" placeholder="Masukkan nama proyek..." value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} style={inputBase} required />
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                    <label style={sectionTitle}>Lokasi</label>
+                                    <input type="text" placeholder="Masukkan lokasi proyek..." value={newProjectLocation} onChange={(e) => setNewProjectLocation(e.target.value)} style={inputBase} required />
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                    <label style={sectionTitle}>Tanggal Mulai</label>
+                                    <input type="date" value={newProjectStartDate} onChange={(e) => setNewProjectStartDate(e.target.value)} style={inputBase} required />
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '0.75rem' }}>
+                                    <button type="button" onClick={() => setShowAddProjectModal(false)} style={btnSecondary}>Batal</button>
+                                    <button type="submit" disabled={addingProject} style={btnPrimary}>
+                                        {addingProject ? 'Menyimpan...' : 'Simpan Proyek'}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
                     </div>
-                </div>
-            )}
+                )}
+
+                {showEditProjectModal && (
+                    <div style={{
+                        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                        backgroundColor: 'rgba(0, 0, 0, 0.5)', display: 'flex',
+                        alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+                        backdropFilter: 'blur(4px)'
+                    }}>
+                        <div style={{
+                            ...cardStyle, width: '400px', padding: '1.5rem',
+                            position: 'relative', background: P.cream, border: `2px solid ${P.goldDark}`,
+                            boxShadow: `0 10px 25px rgba(0,0,0,0.3)`
+                        }}>
+                            <CartoucheFrame />
+                            <h3 style={{ fontSize: '1rem', fontWeight: 700, color: P.umber, fontFamily: 'Georgia, serif', marginBottom: '1rem', borderBottom: `1.5px solid ${P.border}`, paddingBottom: '0.5rem' }}>
+                                Edit Proyek
+                            </h3>
+                            <form onSubmit={handleEditProject} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                    <label style={sectionTitle}>Nama Proyek</label>
+                                    <input type="text" placeholder="Masukkan nama proyek..." value={editProjectName} onChange={(e) => setEditProjectName(e.target.value)} style={inputBase} required />
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                    <label style={sectionTitle}>Lokasi</label>
+                                    <input type="text" placeholder="Masukkan lokasi proyek..." value={editProjectLocation} onChange={(e) => setEditProjectLocation(e.target.value)} style={inputBase} />
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                    <label style={sectionTitle}>Tanggal Mulai</label>
+                                    <input type="date" value={editProjectStartDate} onChange={(e) => setEditProjectStartDate(e.target.value)} style={inputBase} />
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                    <label style={sectionTitle}>Status</label>
+                                    <select value={editProjectStatus} onChange={(e) => setEditProjectStatus(e.target.value)} style={{ ...inputBase, cursor: 'pointer' }}>
+                                        <option value="planning">Planning</option>
+                                        <option value="active">Active</option>
+                                        <option value="completed">Completed</option>
+                                        <option value="on_hold">On Hold</option>
+                                        <option value="cancelled">Cancelled</option>
+                                    </select>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '0.75rem' }}>
+                                    <button type="button" onClick={() => setShowEditProjectModal(false)} style={btnSecondary}>Batal</button>
+                                    <button type="submit" disabled={savingProject} style={btnPrimary}>
+                                        {savingProject ? 'Menyimpan...' : 'Simpan Perubahan'}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
 
                 <style>{`
                     @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

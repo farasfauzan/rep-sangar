@@ -10,12 +10,28 @@ class ProjectController extends Controller
 {
     public function index()
     {
-        return response()->json(Project::all());
+        $projects = Project::select('id', 'project_name', 'location', 'start_date', 'status')
+            ->orderBy('id', 'desc')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => $projects,
+        ]);
     }
 
     public function show($id)
     {
-        return response()->json(Project::with('rabBudgets')->findOrFail($id));
+        $project = Project::with(['rabBudgets' => function ($q) {
+            $q->select('id', 'project_id', 'code_item', 'description', 'total_price', 'category', 'status', 'version')
+              ->where('status', '!=', 'ARCHIVED')
+              ->latest('version');
+        }])->findOrFail($id);
+
+        return response()->json([
+            'success' => true,
+            'data' => $project,
+        ]);
     }
 
     public function store(Request $request)
@@ -33,5 +49,25 @@ class ProjectController extends Controller
             'message' => 'Proyek baru berhasil dibuat.',
             'data' => $project
         ], 201);
+    }
+
+    public function update(Request $request, $id)
+    {
+        $project = Project::findOrFail($id);
+
+        $validated = $request->validate([
+            'project_name' => 'sometimes|required|string|max:255',
+            'location' => 'sometimes|nullable|string|max:255',
+            'start_date' => 'sometimes|nullable|date',
+            'status' => 'sometimes|in:planning,active,completed,on_hold,cancelled',
+        ]);
+
+        $project->update($validated);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Proyek berhasil diperbarui.',
+            'data' => $project->fresh(),
+        ]);
     }
 }

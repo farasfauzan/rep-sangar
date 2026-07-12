@@ -407,8 +407,9 @@ trait HandlesRabParsing
 
     /**
      * Normalize row and return data or validation error array.
+     * @param bool $useLlm When false (default), AI LLM classification is skipped during validation to keep imports fast.
      */
-    protected function normalizeRabRow(array $row, array $columnMap, int $rowNumber, ?string $currentSectionCode = null): ?array
+    protected function normalizeRabRow(array $row, array $columnMap, int $rowNumber, ?string $currentSectionCode = null, bool $useLlm = false): ?array
     {
         $description = trim((string) ($row[$columnMap['uraian']] ?? ''));
         
@@ -480,7 +481,7 @@ trait HandlesRabParsing
 
         // Auto-classify if no category column or empty
         if ($category === null) {
-            $category = $this->autoClassifyCategory($description);
+            $category = $this->autoClassifyCategory($description, $useLlm);
         }
 
         $code = trim((string) ($row[$columnMap['kode'] ?? -1] ?? ''));
@@ -797,15 +798,18 @@ trait HandlesRabParsing
     /**
      * Auto-classify RAB item into construction work category based on description.
      * Uses keyword scoring — highest score wins. Returns category string or null.
+     * @param bool $useLlm When false (default), skip the LLM and only use keyword fallback.
      */
-    protected function autoClassifyCategory(string $description): ?string
+    protected function autoClassifyCategory(string $description, bool $useLlm = false): ?string
     {
         $desc = strtolower(trim($description));
         if ($desc === '') return null;
 
-        $llmResult = $this->classifyWithLLM($description);
-        if ($llmResult !== null) {
-            return $llmResult;
+        if ($useLlm) {
+            $llmResult = $this->classifyWithLLM($description);
+            if ($llmResult !== null) {
+                return $llmResult;
+            }
         }
 
         $categories = [

@@ -99,6 +99,10 @@ class RabBudgetController extends Controller
      */
     public function autoImport(Request $request)
     {
+        // Parsing Excel 1000+ row bisa makan waktu; hilangkan batas 30s
+        @set_time_limit(0);
+        @ini_set('memory_limit', '512M');
+
         $request->validate([
             'project_id' => 'required|exists:projects,id',
             'file' => 'required|file|mimes:xlsx,xls,csv,txt|max:51200',
@@ -312,6 +316,9 @@ class RabBudgetController extends Controller
      */
     public function importAsync(Request $request)
     {
+        @set_time_limit(0);
+        @ini_set('memory_limit', '512M');
+
         $validator = \Illuminate\Support\Facades\Validator::make($request->all(), [
             'project_id' => 'required|exists:projects,id',
             'file' => 'required|file|mimes:xlsx,xls,csv,txt|max:51200',
@@ -343,7 +350,7 @@ class RabBudgetController extends Controller
                 'status' => RabImportJob::STATUS_PENDING,
             ]);
 
-            ValidateRabImportJob::dispatch($job->id);
+            dispatch_sync(new ValidateRabImportJob($job->id));
 
             return response()->json([
                 'success' => true,

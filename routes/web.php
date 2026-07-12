@@ -66,6 +66,14 @@ Route::get('/rab-control', function () {
     return Inertia::render('RabControl');
 })->middleware(['auth', 'verified'])->name('rab-control');
 
+Route::get('/rab-storage', [\App\Http\Controllers\RabStorageController::class, 'index'])
+    ->middleware(['auth', 'verified'])
+    ->name('rab-storage');
+
+Route::get('/rab-storage/{job}/download', [\App\Http\Controllers\RabStorageController::class, 'download'])
+    ->middleware(['auth', 'verified'])
+    ->name('rab-storage.download');
+
 // RAB routes (web auth, not API token)
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/rab/preview', [\App\Http\Controllers\Api\RabBudgetController::class, 'preview']);
@@ -78,4 +86,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/rab/submit-for-approval', [\App\Http\Controllers\Api\RabBudgetController::class, 'submitForApproval']);
     Route::post('/rab/approve', [\App\Http\Controllers\Api\RabBudgetController::class, 'approve']);
     Route::post('/rab/reject', [\App\Http\Controllers\Api\RabBudgetController::class, 'reject']);
+});
+
+Route::middleware(['auth', 'verified'])->group(function () {
+    Route::get('/faktur-pajak', fn () => Inertia::render('FakturPajak'))->name('faktur-pajak');
+    Route::get('/e-faktur-csv', fn () => Inertia::render('EFakturCsv'))->name('e-faktur-csv');
+    Route::get('/posting-jurnal', fn () => Inertia::render('PostingJurnal'))->name('posting-jurnal');
+    Route::get('/laporan-keuangan', fn () => Inertia::render('LaporanKeuangan'))->name('laporan-keuangan');
+    Route::get('/audit-trail', fn () => Inertia::render('AuditTrail'))->name('audit-trail');
 });

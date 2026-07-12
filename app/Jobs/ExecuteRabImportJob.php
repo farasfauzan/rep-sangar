@@ -34,6 +34,13 @@ class ExecuteRabImportJob implements ShouldQueue
         if (! $job || $job->status !== RabImportJob::STATUS_IMPORTING) return;
 
         try {
+            // 0. Ensure SQLite busy_timeout is high enough to survive lock contention
+            try {
+                DB::statement('PRAGMA busy_timeout=5000');
+            } catch (\Throwable $_) {
+                // Ignore if not SQLite
+            }
+
             // 1. Identify all valid sheets and columns again
             $rawResult = $this->parseRaw($job->file_path, $job->file_type, 100);
             $sheets = $rawResult['sheets'];
@@ -49,7 +56,7 @@ class ExecuteRabImportJob implements ShouldQueue
             $currentMaxVersion = RabBudget::where('project_id', $projectId)->max('version') ?? 0;
             $newVersion = $currentMaxVersion + 1;
 
-            $batchSize = 250;
+            $batchSize = 100;
             $batch = [];
             $totalImported = 0;
 
@@ -152,7 +159,7 @@ class ExecuteRabImportJob implements ShouldQueue
                     ];
 
                     if (count($batch) >= $batchSize) {
-                        RabBudget::insert($batch);
+                        $this->insertWithRetry(RabBudget::class, $batch);
                         $totalImported += count($batch);
                         $job->update(['processed_rows' => $totalImported]);
                         $batch = [];
@@ -161,30 +168,30 @@ class ExecuteRabImportJob implements ShouldQueue
             }
 
             if ($batch !== []) {
-                RabBudget::insert($batch);
+                $this->insertWithRetry(RabBudget::class, $batch);
                 $totalImported += count($batch);
                 $job->update(['processed_rows' => $totalImported]);
             }
 
-            // 3. AI classification for all new items
+            // 3. AI classification for all new items (async, non-blocking)
+            // Dispatch classification in chunks so API latency does not hold up the import transaction.
             $mimo = app(MimoAiService::class);
             if ($mimo->isConfigured()) {
-                $newItems = RabBudget::where('project_id', $projectId)
+                $newItemCount = RabBudget::where('project_id', $projectId)
                     ->where('version', $newVersion)
                     ->whereNull('ai_category')
-                    ->get(['id', 'description']);
+                    ->count();
 
-                $descriptions = $newItems->pluck('description')->toArray();
-                $categories = $mimo->classifyBatch($descriptions);
-
-                foreach ($newItems as $i => $item) {
-                    if (($categories[$i] ?? null) !== null) {
-                        RabBudget::where('id', $item->id)->update(['ai_category' => $categories[$i]]);
-                    }
+                $chunkSize = 100;
+                for ($offset = 0; $offset < $newItemCount; $offset += $chunkSize) {
+                    ClassifyRabAiJob::dispatch($projectId, $newVersion, $offset, $chunkSize);
                 }
-                Log::info("AI classification done", [
-                    'classified' => count(array_filter($categories)),
-                    'total' => count($descriptions),
+
+                Log::info('AI classification dispatched', [
+                    'project_id' => $projectId,
+                    'version' => $newVersion,
+                    'items' => $newItemCount,
+                    'chunks' => ceil($newItemCount / $chunkSize),
                 ]);
             }
 
@@ -261,14 +268,14 @@ class ExecuteRabImportJob implements ShouldQueue
                     ];
 
                     if (count($stockBatch) >= $batchSize) {
-                        InventoryStock::insert($stockBatch);
+                        $this->insertWithRetry(InventoryStock::class, $stockBatch);
                         $stockBatch = [];
                     }
                 }
             }
 
             if ($stockBatch !== []) {
-                InventoryStock::insert($stockBatch);
+                $this->insertWithRetry(InventoryStock::class, $stockBatch);
             }
 
             DB::commit();
@@ -284,6 +291,32 @@ class ExecuteRabImportJob implements ShouldQueue
                 'status' => RabImportJob::STATUS_FAILED,
                 'errors' => ['Gagal memproses import data: ' . $e->getMessage()],
             ]);
+        }
+    }
+
+    /**
+     * Insert with retry on SQLite "database is locked" (HY000 code 5).
+     */
+    private function insertWithRetry(string $modelClass, array $rows, int $maxRetries = 3): void
+    {
+        $attempt = 0;
+        while (true) {
+            try {
+                $modelClass::insert($rows);
+                return;
+            } catch (\Throwable $e) {
+                $attempt++;
+                if ($attempt >= $maxRetries) {
+                    throw $e;
+                }
+                // Check if this is a "database is locked" error
+                $msg = $e->getMessage();
+                if (str_contains($msg, 'database is locked') || (str_contains($msg, 'HY000') && str_contains($msg, '5 '))) {
+                    usleep(200000 * $attempt); // 0.2s, 0.4s, 0.6s backoff
+                    continue;
+                }
+                throw $e;
+            }
         }
     }
 

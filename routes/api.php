@@ -13,8 +13,9 @@ use App\Http\Controllers\Api\FundRequestController;
 use App\Http\Controllers\Api\PurchaseRequisitionController;
 use App\Http\Controllers\Api\InventoryController;
 use App\Http\Controllers\Api\AuditLogController;
+use App\Http\Controllers\Api\DashboardReportController;
 
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware(['auth:web', 'verified'])->withoutMiddleware([\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class])->group(function () {
     Route::get('/user', function (Request $request) {
         return $request->user();
     });
@@ -83,6 +84,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/projects', [ProjectController::class, 'index']);
     Route::get('/projects/{id}', [ProjectController::class, 'show']);
     Route::post('/projects', [ProjectController::class, 'store']);
+    Route::put('/projects/{id}', [ProjectController::class, 'update']);
+    Route::patch('/projects/{id}', [ProjectController::class, 'update']);
 
     // Inventory
     Route::get('/inventory', [InventoryController::class, 'index']);
@@ -90,4 +93,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Audit Trail
     Route::get('/audit-logs', [AuditLogController::class, 'index']);
+
+    // Dashboard & Reports
+    Route::get('/dashboard/executive', [DashboardReportController::class, 'executive']);
+    Route::get('/dashboard/financial', [DashboardReportController::class, 'financial']);
+    Route::get('/dashboard/projects', [DashboardReportController::class, 'projects']);
 });

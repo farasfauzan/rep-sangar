@@ -18,6 +18,7 @@ export default function Authenticated({ header, children }) {
                 return [
                     { name: 'Dashboard', route: 'dashboard', icon: '📊' },
                     { name: 'Kontrol RAB', route: 'rab-control', icon: '📋' },
+                    { name: 'Penyimpanan RAB', route: 'rab-storage', icon: '💾' },
                     { name: 'Purchase Orders', route: 'po', icon: '🛒' },
                     { name: 'Kontrak SPK', route: 'spk', icon: '📜' },
                     { name: 'Penerimaan Barang', route: 'goods-receipts', icon: '📦' },
@@ -39,6 +40,7 @@ export default function Authenticated({ header, children }) {
                 return [
                     { name: 'Dashboard Verifikasi', route: 'dashboard', icon: '📋' },
                     { name: 'Kontrol RAB', route: 'rab-control', icon: '📋' },
+                    { name: 'Penyimpanan RAB', route: 'rab-storage', icon: '💾' },
                     { name: 'Verifikasi Kebutuhan', route: 'dashboard', icon: '🔍' },
                     { name: 'Verifikasi Tagihan', route: 'approval', icon: '✅' },
                 ];
@@ -59,6 +61,7 @@ export default function Authenticated({ header, children }) {
                 return [
                     { name: 'Executive Dashboard', route: 'dashboard', icon: '📈' },
                     { name: 'Kontrol RAB', route: 'rab-control', icon: '📋' },
+                    { name: 'Penyimpanan RAB', route: 'rab-storage', icon: '💾' },
                     { name: 'Approval PO & SPK', route: 'approval', icon: '✍️' },
                     { name: 'Approval Cashflow', route: 'approval', icon: '✍️' },
                 ];
@@ -71,15 +74,15 @@ export default function Authenticated({ header, children }) {
             case 'PAJAK':
                 return [
                     { name: 'Dashboard Pajak', route: 'dashboard', icon: '🏛️' },
-                    { name: 'Faktur Pajak', route: 'dashboard', icon: '🧾' },
-                    { name: 'E-Faktur CSV', route: 'dashboard', icon: '⬇️' },
+                    { name: 'Faktur Pajak', route: 'faktur-pajak', icon: '🧾' },
+                    { name: 'E-Faktur CSV', route: 'e-faktur-csv', icon: '⬇️' },
                 ];
             case 'ACCOUNTING':
                 return [
                     { name: 'Dashboard Akuntansi', route: 'dashboard', icon: '📊' },
-                    { name: 'Posting Jurnal', route: 'dashboard', icon: '📔' },
-                    { name: 'Trial Balance', route: 'dashboard', icon: '⚖️' },
-                    { name: 'Laporan Keuangan', route: 'dashboard', icon: '📉' },
+                    { name: 'Posting Jurnal', route: 'posting-jurnal', icon: '📔' },
+                    { name: 'Laporan Keuangan', route: 'laporan-keuangan', icon: '📉' },
+                    { name: 'Audit Trail', route: 'audit-trail', icon: '🔍' },
                 ];
             default:
                 return [{ name: 'Dashboard', route: 'dashboard', icon: '📊' }];
