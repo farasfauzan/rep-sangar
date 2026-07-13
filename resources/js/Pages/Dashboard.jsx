@@ -1,7 +1,7 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import ErrorBoundary from '@/Components/ErrorBoundary';
 import { Head } from '@inertiajs/react';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Modal, Button } from '@/Components/ui';
 import ExecutiveSummary from '@/Pages/Dashboard/ExecutiveSummary';
 import FinancialChart from '@/Pages/Dashboard/FinancialChart';
@@ -9,7 +9,9 @@ import ProjectsList from '@/Pages/Dashboard/ProjectsList';
 import RabImport from '@/Pages/Dashboard/RabImport';
 import QuickActions from '@/Pages/Dashboard/QuickActions';
 import RoleOverview from '@/Pages/Dashboard/RoleOverview';
-import axios from 'axios';
+import { useApi } from '@/hooks/useApi';
+import { useProjects } from '@/hooks/useProjects';
+import { updateProjectsCache } from '@/hooks/useProjects';
 
 const tabs = [
     { id: 'import', label: 'Import', icon: '📥' },
@@ -25,7 +27,8 @@ const labelCls = 'block text-xs font-semibold uppercase tracking-wider text-gray
 
 export default function Dashboard({ auth }) {
     const toast = useToast();
-    const [projects, setProjects] = useState([]);
+    const api = useApi();
+    const { projects, refresh: refreshProjects } = useProjects();
     const [projectId, setProjectId] = useState(1);
     const [activeTab, setActiveTab] = useState('import');
     const [showAddModal, setShowAddModal] = useState(false);
@@ -36,12 +39,6 @@ export default function Dashboard({ auth }) {
     const currentProject = projects.find((p) => p.id === projectId);
     const projectName = currentProject?.project_name || `Project #${projectId}`;
 
-    useEffect(() => {
-        axios.get('/api/projects')
-            .then((res) => { const list = res.data?.data ?? res.data ?? []; setProjects(Array.isArray(list) ? list : []); })
-            .catch(() => {});
-    }, []);
-
     const resetForm = () => setForm({ name: '', location: '', startDate: '', status: 'planning' });
 
     const handleAddProject = async (e) => {
@@ -49,12 +46,13 @@ export default function Dashboard({ auth }) {
         if (!form.name || !form.location || !form.startDate) { toast.error('Semua field proyek wajib diisi.'); return; }
         setSaving(true);
         try {
-            const res = await axios.post('/api/projects', { project_name: form.name, location: form.location, start_date: form.startDate });
-            setProjects((prev) => [...prev, res.data]);
-            setProjectId(res.data.id);
+            const res = await api.post('/api/projects', { project_name: form.name, location: form.location, start_date: form.startDate });
+            updateProjectsCache([...projects, res]);
+            await refreshProjects();
+            setProjectId(res.id);
             setShowAddModal(false);
             resetForm();
-        } catch (err) { toast.error(err.response?.data?.message || 'Gagal menambahkan proyek.'); }
+        } catch (err) { /* toast shown by useApi */ }
         finally { setSaving(false); }
     };
 
@@ -68,10 +66,11 @@ export default function Dashboard({ auth }) {
         e.preventDefault();
         setSaving(true);
         try {
-            const res = await axios.put(`/api/projects/${projectId}`, { project_name: form.name, location: form.location, start_date: form.startDate || null, status: form.status });
-            setProjects((prev) => prev.map((p) => (p.id === projectId ? { ...p, ...res.data } : p)));
+            const res = await api.put(`/api/projects/${projectId}`, { project_name: form.name, location: form.location, start_date: form.startDate || null, status: form.status });
+            updateProjectsCache(projects.map((p) => (p.id === projectId ? { ...p, ...res } : p)));
+            await refreshProjects();
             setShowEditModal(false);
-        } catch (err) { toast.error(err.response?.data?.message || 'Gagal memperbarui proyek.'); }
+        } catch (err) { /* toast shown by useApi */ }
         finally { setSaving(false); }
     };
 

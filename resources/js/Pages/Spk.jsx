@@ -1,6 +1,7 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head } from '@inertiajs/react';
-import axios from 'axios';
+import { useApi } from '@/hooks/useApi';
+import { useProjects } from '@/hooks/useProjects';
 import { useEffect, useState } from 'react';
 import ConfirmModal from '@/Components/ui/ConfirmModal';
 

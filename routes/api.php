@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\InventoryController;
 use App\Http\Controllers\Api\AuditLogController;
 use App\Http\Controllers\Api\DashboardReportController;
 use App\Http\Controllers\Api\UserController;
+use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\SupplierController;
 use App\Http\Controllers\Api\GeneralLedgerController;
 use App\Http\Controllers\Api\ChartOfAccountController;
@@ -245,5 +246,6 @@ Route::middleware(['auth:web', 'verified'])->withoutMiddleware([\Illuminate\Foun
     Route::middleware('role:ADMIN')->group(function () {
         Route::apiResource('users', UserController::class);
         Route::put('users/{user}/role', [UserController::class, 'assignRole']);
+        Route::get('roles', [RoleController::class, 'index']);
     });
 });

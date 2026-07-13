@@ -88,10 +88,24 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/rab/reject', [\App\Http\Controllers\Api\RabBudgetController::class, 'reject']);
 });
 
+// Supplier routes
+Route::middleware(['auth', 'verified'])->group(function () {
+    Route::get('/suppliers', fn () => Inertia::render('SupplierList'))->name('suppliers');
+    Route::get('/suppliers/create', fn () => Inertia::render('SupplierForm'))->name('suppliers.create');
+    Route::get('/suppliers/{id}/edit', fn ($id) => Inertia::render('SupplierForm', ['id' => $id]))->name('suppliers.edit');
+});
+
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/faktur-pajak', fn () => Inertia::render('FakturPajak'))->name('faktur-pajak');
     Route::get('/e-faktur-csv', fn () => Inertia::render('EFakturCsv'))->name('e-faktur-csv');
     Route::get('/posting-jurnal', fn () => Inertia::render('PostingJurnal'))->name('posting-jurnal');
     Route::get('/laporan-keuangan', fn () => Inertia::render('LaporanKeuangan'))->name('laporan-keuangan');
     Route::get('/audit-trail', fn () => Inertia::render('AuditTrail'))->name('audit-trail');
+    Route::get('/admin/users', fn () => Inertia::render('UserManagement'))->name('admin.users');
+});
+
+// Purchase Order detail & edit routes
+Route::middleware(['auth', 'verified'])->group(function () {
+    Route::get('/purchase-orders/{id}', fn ($id) => Inertia::render('PurchaseOrderDetail', ['id' => $id]))->name('purchase-orders.show');
+    Route::get('/purchase-orders/{id}/edit', fn ($id) => Inertia::render('PurchaseOrderEdit', ['id' => $id]))->name('purchase-orders.edit');
 });

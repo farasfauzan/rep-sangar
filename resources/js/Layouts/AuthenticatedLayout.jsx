@@ -40,6 +40,10 @@ export default function Authenticated({ header, children }) {
             'posting-jurnal': 'Posting Jurnal',
             'laporan-keuangan': 'Laporan Keuangan',
             'audit-trail': 'Audit Trail',
+            admin: 'Kelola User',
+            suppliers: 'Supplier',
+            create: 'Tambah Supplier',
+            edit: 'Edit Supplier',
             'profile.edit': 'Profile',
         };
         return nameMap[last] || last.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
@@ -54,6 +58,7 @@ export default function Authenticated({ header, children }) {
                     { name: 'Kontrol RAB', route: 'rab-control', icon: '📋' },
                     { name: 'Penyimpanan RAB', route: 'rab-storage', icon: '💾' },
                     { name: 'Purchase Orders', route: 'po', icon: '🛒' },
+                    { name: 'Supplier', route: 'suppliers', icon: '🏭' },
                     { name: 'Kontrak SPK', route: 'spk', icon: '📜' },
                     { name: 'Penerimaan Barang', route: 'goods-receipts', icon: '📦' },
                     { name: 'Input Opname', route: 'opname', icon: '🏗️' },
@@ -61,6 +66,7 @@ export default function Authenticated({ header, children }) {
                     { name: 'Approval', route: 'approval', icon: '✍️' },
                     { name: 'LPJ & Permohonan', route: 'fund-requests', icon: '💸' },
                     { name: 'Pembayaran', route: 'payment', icon: '💸' },
+                    { name: 'Kelola User', route: 'admin.users', icon: '👥' },
                 ];
             case 'LAPANGAN':
                 return [
@@ -82,6 +88,7 @@ export default function Authenticated({ header, children }) {
                 return [
                     { name: 'Dashboard Pengadaan', route: 'dashboard', icon: '📊' },
                     { name: 'Purchase Orders', route: 'po', icon: '🛒' },
+                    { name: 'Supplier', route: 'suppliers', icon: '🏭' },
                     { name: 'Kontrak SPK', route: 'spk', icon: '📜' },
                     { name: 'Input Tagihan', route: 'invoicing', icon: '📥' },
                 ];

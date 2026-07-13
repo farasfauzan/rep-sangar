@@ -1,7 +1,7 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head } from '@inertiajs/react';
 import { useState, useEffect } from 'react';
-import axios from 'axios';
+import { useApi } from '@/hooks/useApi';
 import { useToast } from '@/Components/ui/Toast';
 import ConfirmModal from '@/Components/ui/ConfirmModal';
 
@@ -9,21 +9,23 @@ export default function PurchaseOrder() {
     const [pos, setPos] = useState([]);
     const [loading, setLoading] = useState(true);
     const [confirmState, setConfirmState] = useState({ open: false, poId: null });
+    const api = useApi();
     const toast = useToast();
 
     useEffect(() => {
         fetchPos();
     }, []);
 
-    const fetchPos = () => {
+    const fetchPos = async () => {
         setLoading(true);
-        axios.get('/api/pos').then(res => {
-            setPos(res.data);
-            setLoading(false);
-        }).catch(err => {
+        try {
+            const data = await api.get('/api/pos', {}, { silent: true });
+            setPos(data);
+        } catch (err) {
             console.error(err);
+        } finally {
             setLoading(false);
-        });
+        }
     };
 
     const submitPo = async (id) => {
@@ -34,10 +36,10 @@ export default function PurchaseOrder() {
         const id = confirmState.poId;
         setConfirmState({ open: false, poId: null });
         try {
-            await axios.put(`/api/pos/${id}/submit`);
+            await api.put(`/api/pos/${id}/submit`);
             await fetchPos();
         } catch (err) {
-            toast.error(err.response?.data?.message || 'Gagal submit PO.');
+            // toast shown by useApi
         }
     };
 
@@ -92,8 +94,22 @@ export default function PurchaseOrder() {
                                                         </span>
                                                     </td>
                                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                        <a
+                                                            href={`/purchase-orders/${po.id}`}
+                                                            className="rounded bg-indigo-600 px-3 py-1 text-sm text-white shadow hover:bg-indigo-700 mr-2"
+                                                        >
+                                                            Lihat Detail
+                                                        </a>
                                                         {po.status === 'DRAFT' ? (
-                                                            <button onClick={() => submitPo(po.id)} className="rounded bg-emerald-600 px-3 py-1 text-sm text-white shadow hover:bg-emerald-700">Submit</button>
+                                                            <>
+                                                                <a
+                                                                    href={`/purchase-orders/${po.id}/edit`}
+                                                                    className="rounded bg-amber-500 px-3 py-1 text-sm text-white shadow hover:bg-amber-600 mr-2"
+                                                                >
+                                                                    Edit
+                                                                </a>
+                                                                <button onClick={() => submitPo(po.id)} className="rounded bg-emerald-600 px-3 py-1 text-sm text-white shadow hover:bg-emerald-700">Submit</button>
+                                                            </>
                                                         ) : '-'}
                                                     </td>
                                                 </tr>
