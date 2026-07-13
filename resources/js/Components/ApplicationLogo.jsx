@@ -7,16 +7,16 @@ export default function ApplicationLogo(props) {
         >
             <defs>
                 <linearGradient id="gradMain" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" style="stop-color:#1e3a5f;stop-opacity:1" />
-                    <stop offset="100%" style="stop-color:#2d5a8a;stop-opacity:1" />
+                    <stop offset="0%" style={{ stopColor: '#1e3a5f', stopOpacity: 1 }} />
+                    <stop offset="100%" style={{ stopColor: '#2d5a8a', stopOpacity: 1 }} />
                 </linearGradient>
                 <linearGradient id="gradAccent" x1="0%" y1="0%" x2="100%" y2="0%">
-                    <stop offset="0%" style="stop-color:#e87d2f;stop-opacity:1" />
-                    <stop offset="100%" style="stop-color:#d46b1a;stop-opacity:1" />
+                    <stop offset="0%" style={{ stopColor: '#e87d2f', stopOpacity: 1 }} />
+                    <stop offset="100%" style={{ stopColor: '#d46b1a', stopOpacity: 1 }} />
                 </linearGradient>
                 <linearGradient id="gradLight" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" style="stop-color:#4a90d9;stop-opacity:1" />
-                    <stop offset="100%" style="stop-color:#357abd;stop-opacity:1" />
+                    <stop offset="0%" style={{ stopColor: '#4a90d9', stopOpacity: 1 }} />
+                    <stop offset="100%" style={{ stopColor: '#357abd', stopOpacity: 1 }} />
                 </linearGradient>
             </defs>
 
@@ -48,7 +48,7 @@ export default function ApplicationLogo(props) {
                 <rect x="98" y="85" width="5" height="5" rx="1" />
             </g>
 
-            <path d="M170 95 L170 70 Q178 55 188 55 L188 60 L172 60 L172 95" stroke="url(#gradAccent)" stroke-width="3" fill="none" stroke-linecap="round" />
+            <path d="M170 95 L170 70 Q178 55 188 55 L188 60 L172 60 L172 95" stroke="url(#gradAccent)" strokeWidth="3" fill="none" strokeLinecap="round" />
             <circle cx="188" cy="55" r="5" fill="url(#gradAccent)" />
         </svg>
     );
