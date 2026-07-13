@@ -1,0 +1,59 @@
+# ==============================================================================
+# Laravel ERP Konstruksi - Systemd Service: Queue Worker (AI Classification)
+# ==============================================================================
+# Dedicated worker for AI classification jobs (can be slow, needs memory)
+# Install: sudo cp deploy-configs/systemd/erp-queue-ai-classify.service /etc/systemd/system/
+# Enable:  sudo systemctl daemon-reload && sudo systemctl enable --now erp-queue-ai-classify
+# ==============================================================================
+
+[Unit]
+Description=Laravel ERP Queue Worker (AI Classification)
+Documentation=https://laravel.com/docs/queues
+After=network.target redis.service mysql.service
+Requires=redis.service mysql.service
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/erp-konstruksi
+Environment=APP_ENV=production
+Environment=APP_DEBUG=false
+Environment=PHP_MEMORY_LIMIT=512M
+ExecStart=/usr/bin/php artisan queue:work redis --queue=ai-classify --sleep=10 --tries=3 --timeout=1800 --max-jobs=100 --memory=512 --rest=60
+ExecReload=/bin/kill -USR1 $MAINPID
+KillSignal=SIGTERM
+TimeoutStopSec=7200
+Restart=always
+RestartSec=15
+RestartPreventExitStatus=255
+StandardOutput=append:/var/log/erp-konstruksi/queue-ai-classify.log
+StandardError=append:/var/log/erp-konstruksi/queue-ai-classify-error.log
+SyslogIdentifier=erp-queue-ai-classify
+
+# Resource limits
+LimitNOFILE=65535
+LimitNPROC=32768
+MemoryLimit=1G
+CPUQuota=70%
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/erp-konstruksi/storage /var/www/erp-konstruksi/bootstrap/cache /var/log/erp-konstruksi
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,60 @@
+# ==============================================================================
+# Laravel ERP Konstruksi - Systemd Service: Laravel Horizon
+# ==============================================================================
+# Horizon provides Redis queue monitoring, metrics, and management UI
+# Install: sudo cp deploy-configs/systemd/erp-horizon.service /etc/systemd/system/
+# Enable:  sudo systemctl daemon-reload && sudo systemctl enable --now erp-horizon
+# Dashboard: https://erp.example.com/horizon (requires auth)
+# ==============================================================================
+
+[Unit]
+Description=Laravel Horizon (Redis Queue Manager & Monitor)
+Documentation=https://laravel.com/docs/horizon
+After=network.target redis.service mysql.service
+Requires=redis.service mysql.service
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/erp-konstruksi
+Environment=APP_ENV=production
+Environment=APP_DEBUG=false
+Environment=PHP_MEMORY_LIMIT=512M
+ExecStart=/usr/bin/php artisan horizon
+ExecReload=/usr/bin/php artisan horizon:terminate
+KillSignal=SIGTERM
+TimeoutStopSec=120
+Restart=always
+RestartSec=10
+RestartPreventExitStatus=255
+StandardOutput=append:/var/log/erp-konstruksi/horizon.log
+StandardError=append:/var/log/erp-konstruksi/horizon-error.log
+SyslogIdentifier=erp-horizon
+
+# Resource limits
+LimitNOFILE=65535
+LimitNPROC=32768
+MemoryLimit=1G
+CPUQuota=80%
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/erp-konstruksi/storage /var/www/erp-konstruksi/bootstrap/cache /var/log/erp-konstruksi
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

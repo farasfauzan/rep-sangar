@@ -1,0 +1,59 @@
+# ==============================================================================
+# Laravel ERP Konstruksi - Systemd Service: Queue Worker (High Priority)
+# ==============================================================================
+# Dedicated worker for high-priority queues (RAB import, payments, notifications)
+# Install: sudo cp deploy-configs/systemd/erp-queue-high.service /etc/systemd/system/
+# Enable:  sudo systemctl daemon-reload && sudo systemctl enable --now erp-queue-high
+# ==============================================================================
+
+[Unit]
+Description=Laravel ERP Queue Worker (High Priority)
+Documentation=https://laravel.com/docs/queues
+After=network.target redis.service mysql.service
+Requires=redis.service mysql.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/erp-konstruksi
+Environment=APP_ENV=production
+Environment=APP_DEBUG=false
+Environment=PHP_MEMORY_LIMIT=512M
+ExecStart=/usr/bin/php artisan queue:work redis --queue=high,notifications,mail,payments --sleep=1 --tries=3 --timeout=180 --max-jobs=500 --memory=512 --rest=5
+ExecReload=/bin/kill -USR1 $MAINPID
+KillSignal=SIGTERM
+TimeoutStopSec=7200
+Restart=always
+RestartSec=5
+RestartPreventExitStatus=255
+StandardOutput=append:/var/log/erp-konstruksi/queue-high.log
+StandardError=append:/var/log/erp-konstruksi/queue-high-error.log
+SyslogIdentifier=erp-queue-high
+
+# Resource limits
+LimitNOFILE=65535
+LimitNPROC=32768
+MemoryLimit=1G
+CPUQuota=90%
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/erp-konstruksi/storage /var/www/erp-konstruksi/bootstrap/cache /var/log/erp-konstruksi
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

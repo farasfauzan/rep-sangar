@@ -1,0 +1,61 @@
+# ==============================================================================
+# Laravel ERP Konstruksi - Systemd Service: Queue Worker (Standard)
+# ==============================================================================
+# Standard queue worker using systemd (alternative to Supervisor)
+# Install: sudo cp deploy-configs/systemd/erp-queue-worker.service /etc/systemd/system/
+# Enable:  sudo systemctl daemon-reload && sudo systemctl enable --now erp-queue-worker
+# Scale:   sudo systemctl start erp-queue-worker@1 erp-queue-worker@2 ...
+# ==============================================================================
+
+[Unit]
+Description=Laravel ERP Queue Worker (%i)
+Documentation=https://laravel.com/docs/queues
+After=network.target redis.service mysql.service
+Requires=redis.service mysql.service
+PartOf=erp-queue-worker.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/erp-konstruksi
+Environment=APP_ENV=production
+Environment=APP_DEBUG=false
+Environment=PHP_MEMORY_LIMIT=256M
+ExecStart=/usr/bin/php artisan queue:work redis --queue=high,default,low --sleep=3 --tries=3 --timeout=180 --max-jobs=1000 --memory=256 --rest=60 --stop-when-empty=false
+ExecReload=/usr/bin/php artisan queue:restart
+KillSignal=SIGTERM
+TimeoutStopSec=3600
+Restart=always
+RestartSec=10
+RestartPreventExitStatus=255
+StandardOutput=append:/var/log/erp-konstruksi/queue-worker-%i.log
+StandardError=append:/var/log/erp-konstruksi/queue-worker-%i-error.log
+SyslogIdentifier=erp-queue-worker-%i
+
+# Resource limits
+LimitNOFILE=65535
+LimitNPROC=32768
+MemoryLimit=512M
+CPUQuota=70%
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/erp-konstruksi/storage /var/www/erp-konstruksi/bootstrap/cache /var/log/erp-konstruksi
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=erp-queue-worker.target

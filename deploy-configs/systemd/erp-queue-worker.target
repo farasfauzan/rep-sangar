@@ -1,0 +1,16 @@
+# ==============================================================================
+# Laravel ERP Konstruksi - Systemd Target: Queue Worker Group
+# ==============================================================================
+# Target to manage multiple queue workers as a group
+# Install: sudo cp deploy-configs/systemd/erp-queue-worker.target /etc/systemd/system/
+# Enable:  sudo systemctl daemon-reload && sudo systemctl enable --now erp-queue-worker.target
+# ==============================================================================
+
+[Unit]
+Description=Laravel ERP Queue Workers Group
+Documentation=https://laravel.com/docs/queues
+Requires=redis.service mysql.service
+After=redis.service mysql.service
+
+[Install]
+WantedBy=multi-user.target

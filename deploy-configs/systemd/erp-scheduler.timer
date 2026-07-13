@@ -1,0 +1,23 @@
+# ==============================================================================
+# Laravel ERP Konstruksi - Systemd Timer: Scheduler (Runs Every Minute)
+# ==============================================================================
+# Timer to trigger the scheduler service every minute
+# Install: sudo cp deploy-configs/systemd/erp-scheduler.timer /etc/systemd/system/
+# Enable:  sudo systemctl daemon-reload && sudo systemctl enable --now erp-scheduler.timer
+# ==============================================================================
+
+[Unit]
+Description=Run Laravel Scheduler Every Minute
+Documentation=https://laravel.com/docs/scheduling
+Requires=erp-scheduler.service
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=1s
+Persistent=true
+RandomizedDelaySec=10
+Unit=erp-scheduler.service
+
+[Install]
+WantedBy=timers.target

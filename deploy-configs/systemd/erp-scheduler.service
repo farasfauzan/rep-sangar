@@ -1,0 +1,62 @@
+# ==============================================================================
+# Laravel ERP Konstruksi - Systemd Service: Scheduler (Cron Replacement)
+# ==============================================================================
+# Runs Laravel scheduler every minute to execute scheduled tasks
+# Install: sudo cp deploy-configs/systemd/erp-scheduler.service /etc/systemd/system/
+# Enable:  sudo systemctl daemon-reload && sudo systemctl enable --now erp-scheduler
+# ==============================================================================
+
+[Unit]
+Description=Laravel ERP Scheduler (Cron Replacement)
+Documentation=https://laravel.com/docs/scheduling
+After=network.target redis.service mysql.service
+Requires=redis.service mysql.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/erp-konstruksi
+Environment=APP_ENV=production
+Environment=APP_DEBUG=false
+Environment=PHP_MEMORY_LIMIT=256M
+ExecStart=/usr/bin/php artisan schedule:run --verbose --no-interaction
+ExecReload=/bin/kill -USR1 $MAINPID
+KillSignal=SIGTERM
+TimeoutStopSec=60
+Restart=always
+RestartSec=60
+RestartPreventExitStatus=255
+StandardOutput=append:/var/log/erp-konstruksi/scheduler.log
+StandardError=append:/var/log/erp-konstruksi/scheduler-error.log
+SyslogIdentifier=erp-scheduler
+
+# Resource limits
+LimitNOFILE=65535
+LimitNPROC=32768
+MemoryLimit=512M
+CPUQuota=30%
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/erp-konstruksi/storage /var/www/erp-konstruksi/bootstrap/cache /var/log/erp-konstruksi
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Run every minute via timer (see erp-scheduler.timer)
+# This service is triggered by the timer, not run continuously
+
+[Install]
+WantedBy=multi-user.target
