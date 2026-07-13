@@ -1,0 +1,15 @@
+node_modules
+vendor
+.git
+.env
+.env.*
+!.env.example
+*.log
+storage/logs/*
+bootstrap/cache/*
+.idea
+.vscode
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

@@ -26,11 +26,11 @@ class SupplierFactory extends Factory
             'address' => fake()->address(),
             'phone' => fake()->phoneNumber(),
             'email' => fake()->unique()->safeEmail(),
-            'bank_name' => fake()->randomElement(['BCA', 'Mandiri', 'BNI', 'BRI', 'CIMB Niaga']),
+            'bank_name' => fake()->randomElement(['BCA', 'Mandiri', 'BNI', 'BRI', 'CIMB Niaga', 'Permata', 'Danamon']),
             'bank_account_number' => fake()->numerify('################'),
             'bank_account_name' => fake()->company(),
             'contact_person' => fake()->name(),
-            'notes' => fake()->optional()->sentence(),
+            'notes' => fake()->optional(0.7)->sentence(),
             'is_active' => true,
         ];
     }

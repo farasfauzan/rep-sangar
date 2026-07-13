@@ -2,10 +2,12 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class InventoryStock extends Model
 {
+    use HasFactory;
     protected $fillable = ['project_id', 'rab_budget_id', 'item_name', 'unit', 'quantity', 'min_quantity', 'location'];
 
     public function project()

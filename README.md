@@ -1,58 +1,176 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# ERP Konstruksi — Construction Management System
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+A comprehensive Enterprise Resource Planning (ERP) system built specifically for the construction industry. Manage your entire project lifecycle from budgeting (RAB) through procurement, execution, invoicing, and accounting — all in one platform.
 
-## About Laravel
+## Features
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+| Module | Description |
+|--------|-------------|
+| **RAB (Rencana Anggaran Biaya)** | Project cost estimation and budget planning |
+| **Purchase Order (PO)** | Vendor procurement with approval workflows |
+| **SPK (Surat Perintah Kerja)** | Work orders and task assignment to subcontractors |
+| **Goods Receipt (GR)** | Material receiving, quality checks, and inventory updates |
+| **Invoice** | Vendor invoice matching against PO and GR (3-way match) |
+| **Payment** | Payment processing and cash-flow tracking |
+| **Inventory** | Warehouse management, stock tracking, material movements |
+| **General Ledger (GL)** | Double-entry accounting with journal posting |
+| **Tax (PPN/PPH)** | Indonesian tax management — PPN (VAT) and PPH withholding |
+| **Project Management** | Project tracking, milestones, and cost-vs-budget analysis |
+| **Reports** | Financial statements, project P&L, tax reports, aging |
+| **User & Role Management** | 9 predefined roles with granular permissions |
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Tech Stack
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+- **Backend:** Laravel 11, PHP 8.3+
+- **Frontend:** React 18 via Inertia.js, Tailwind CSS 3
+- **Database:** SQLite (development) / MySQL 8.0 (production)
+- **Build:** Vite 5
+- **Testing:** PHPUnit / Pest
 
-## Learning Laravel
+## Prerequisites
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+- PHP 8.3 or higher (with extensions: pdo, mbstring, openssl, tokenizer, xml, ctype, json, bcmath, fileinfo)
+- Composer 2.x
+- Node.js 18+ and npm 9+
+- MySQL 8.0 (for production) or SQLite (for development)
 
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+## Installation
 
 ```bash
-composer require laravel/boost --dev
+# 1. Clone the repository
+git clone https://github.com/your-org/rep-sangar.git
+cd rep-sangar
 
-php artisan boost:install
+# 2. Install PHP dependencies
+composer install
+
+# 3. Install Node dependencies
+npm install
+
+# 4. Create environment file
+cp .env.example .env
+
+# 5. Generate application key
+php artisan key:generate
+
+# 6. Configure database in .env
+#    For SQLite (dev):  DB_CONNECTION=sqlite  (remove other DB_* lines)
+#    For MySQL (prod):  set DB_HOST, DB_PORT, DB_DATABASE, DB_USERNAME, DB_PASSWORD
+
+# 7. Run database migrations
+php artisan migrate
+
+# 8. Seed default roles, permissions, and admin user
+php artisan db:seed
+
+# 9. Start development server
+npm run dev          # Vite dev server (hot reload)
+php artisan serve    # Laravel dev server at http://localhost:8000
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+## Role System
+
+The application ships with 9 predefined roles:
+
+| # | Role | Description |
+|---|------|-------------|
+| 1 | **Super Admin** | Full system access, user and role management |
+| 2 | **Direksi** | Executive oversight — dashboards, reports, approvals |
+| 3 | **Project Manager** | Project planning, RAB creation, SPK management |
+| 4 | **Purchasing** | Purchase order creation, vendor management, GR processing |
+| 5 | **Finance** | Invoice verification, payment processing, GL posting |
+| 6 | **Accounting** | Journal entries, tax reporting, financial statements |
+| 7 | **Warehouse** | Inventory management, stock movements, material tracking |
+| 8 | **Supervisor** | Field supervision, SPK progress updates, quality checks |
+| 9 | **Staff** | Limited read/write access within assigned projects |
+
+## Business Workflow
+
+```
+┌─────┐    ┌─────┐    ┌─────┐    ┌─────────┐    ┌─────────┐
+│ RAB │───▶│ PO  │───▶│ GR  │───▶│ Invoice │───▶│ Payment │
+└─────┘    └─────┘    └─────┘    └─────────┘    └─────────┘
+   │                      │            │
+   ▼                      ▼            ▼
+┌─────────┐         ┌──────────┐  ┌──────────┐
+│ Budget  │         │Inventory │  │    GL    │
+│ Control │         │ Update   │  │  Journal │
+└─────────┘         └──────────┘  └──────────┘
+```
+
+1. **RAB** — Estimate project costs per item/category
+2. **PO** — Raise purchase orders against approved RAB budgets
+3. **GR** — Receive materials, verify quantity/quality, update inventory
+4. **Invoice** — Match vendor invoices to PO and GR (3-way match)
+5. **Payment** — Process approved payments, post to General Ledger
+6. **GL** — Automatic journal entries for every financial transaction
+
+## API Documentation
+
+The application exposes a RESTful JSON API under `/api/v1/`. Authentication uses Laravel Sanctum tokens.
+
+Key endpoints:
+- `POST /api/v1/login` — Authenticate and receive token
+- `GET /api/v1/projects` — List projects
+- `GET /api/v1/rabs` — List RAB documents
+- `GET /api/v1/purchase-orders` — List POs
+- `POST /api/v1/goods-receipts` — Create goods receipt
+- `GET /api/v1/invoices` — List invoices
+
+Full API documentation is available at `/api/documentation` when running in local environment (Laravel Scribe).
+
+## Testing
+
+```bash
+# Run all tests
+php artisan test
+
+# Run with coverage
+php artisan test --coverage
+
+# Run specific test suite
+php artisan test --testsuite=Feature
+php artisan test --testsuite=Unit
+```
+
+## Docker
+
+```bash
+# Build and start containers
+docker compose up -d --build
+
+# Run migrations inside the app container
+docker compose exec app php artisan migrate --seed
+
+# Access the application
+open http://localhost:8000
+```
 
 ## Contributing
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/my-feature`)
+3. Write tests first (TDD encouraged)
+4. Commit your changes (`git commit -m 'feat: add my feature'`)
+5. Push to the branch (`git push origin feature/my-feature`)
+6. Open a Pull Request against `main`
 
-## Code of Conduct
+### Commit Convention
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+We follow [Conventional Commits](https://www.conventionalcommits.org/):
+- `feat:` — New feature
+- `fix:` — Bug fix
+- `refactor:` — Code refactoring
+- `test:` — Adding or updating tests
+- `docs:` — Documentation changes
+- `chore:` — Maintenance tasks
 
-## Security Vulnerabilities
+### Code Standards
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+- PHP: PSR-12, enforced via Laravel Pint
+- JavaScript: ESLint with the project config
+- All PRs must pass CI (tests + build)
 
 ## License
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+Proprietary — All rights reserved.
