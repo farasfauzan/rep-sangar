@@ -8,11 +8,12 @@ use Illuminate\Http\Request;
 
 class ProjectController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
+        $perPage = min($request->query('per_page', 15), 100);
         $projects = Project::select('id', 'project_name', 'location', 'start_date', 'status')
             ->orderBy('id', 'desc')
-            ->get();
+            ->paginate($perPage);
 
         return response()->json([
             'success' => true,
@@ -24,8 +25,8 @@ class ProjectController extends Controller
     {
         $project = Project::with(['rabBudgets' => function ($q) {
             $q->select('id', 'project_id', 'code_item', 'description', 'total_price', 'category', 'status', 'version')
-              ->where('status', '!=', 'ARCHIVED')
-              ->latest('version');
+                ->where('status', '!=', 'ARCHIVED')
+                ->latest('version');
         }])->findOrFail($id);
 
         return response()->json([
@@ -47,7 +48,7 @@ class ProjectController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Proyek baru berhasil dibuat.',
-            'data' => $project
+            'data' => $project,
         ], 201);
     }
 

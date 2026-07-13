@@ -7,26 +7,29 @@ use App\Models\ApprovalLog;
 use App\Models\Opname;
 use App\Models\Spk;
 use App\Support\WorkflowState;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class OpnameController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
+        $perPage = min($request->query('per_page', 15), 100);
+
         return response()->json(
-            Opname::with(['spk.project'])->get()
+            Opname::with(['spk.project'])->latest()->paginate($perPage)
         );
     }
 
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'spk_id'              => 'required|exists:spks,id',
-            'opname_number'       => 'required|string|unique:opnames,opname_number',
-            'date'                => 'required|date',
+            'spk_id' => 'required|exists:spks,id',
+            'opname_number' => 'required|string|unique:opnames,opname_number',
+            'date' => 'required|date',
             'progress_percentage' => 'required|numeric|min:0.01|max:100',
-            'amount'              => 'required|numeric|min:0.01',
+            'amount' => 'required|numeric|min:0.01',
         ]);
 
         $opname = DB::transaction(function () use ($validated) {
@@ -56,41 +59,55 @@ class OpnameController extends Controller
 
         return response()->json([
             'message' => 'Opname berhasil dicatat.',
-            'data' => $opname->load('spk')
+            'data' => $opname->load('spk'),
         ], 201);
     }
 
     public function approve(Request $request, $id)
     {
-        $opname = Opname::findOrFail($id);
-        WorkflowState::require(
-            $opname->status,
-            ['PENDING'],
-            'Opname harus berstatus PENDING sebelum disetujui.'
-        );
+        $result = DB::transaction(function () use ($request, $id) {
+            $opname = Opname::where('id', $id)->lockForUpdate()->firstOrFail();
 
-        $opname->update([
-            'status' => 'APPROVED',
-            'approved_by' => $request->user()?->id,
-        ]);
-        $this->log($request, $opname, 'APPROVE');
+            if ($opname->status !== 'PENDING') {
+                return response()->json(['message' => 'Opname harus berstatus PENDING sebelum disetujui.'], 422);
+            }
 
-        return response()->json(['message' => 'Opname disetujui dan siap dibuatkan invoice.', 'data' => $opname]);
+            $opname->update([
+                'status' => 'APPROVED',
+                'approved_by' => $request->user()?->id,
+            ]);
+            $this->log($request, $opname, 'APPROVE');
+
+            return $opname->fresh();
+        });
+
+        if ($result instanceof JsonResponse) {
+            return $result;
+        }
+
+        return response()->json(['message' => 'Opname disetujui dan siap dibuatkan invoice.', 'data' => $result]);
     }
 
     public function reject(Request $request, $id)
     {
-        $opname = Opname::findOrFail($id);
-        WorkflowState::require(
-            $opname->status,
-            ['PENDING'],
-            'Opname harus berstatus PENDING sebelum ditolak.'
-        );
+        $result = DB::transaction(function () use ($request, $id) {
+            $opname = Opname::where('id', $id)->lockForUpdate()->firstOrFail();
 
-        $opname->update(['status' => 'REJECTED']);
-        $this->log($request, $opname, 'REJECT', $request->input('notes'));
+            if ($opname->status !== 'PENDING') {
+                return response()->json(['message' => 'Opname harus berstatus PENDING sebelum ditolak.'], 422);
+            }
 
-        return response()->json(['message' => 'Opname ditolak.', 'data' => $opname]);
+            $opname->update(['status' => 'REJECTED']);
+            $this->log($request, $opname, 'REJECT', $request->input('notes'));
+
+            return $opname->fresh();
+        });
+
+        if ($result instanceof JsonResponse) {
+            return $result;
+        }
+
+        return response()->json(['message' => 'Opname ditolak.', 'data' => $result]);
     }
 
     private function log(Request $request, Opname $opname, string $action, ?string $notes = null): void

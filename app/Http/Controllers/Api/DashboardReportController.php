@@ -264,7 +264,12 @@ class DashboardReportController extends Controller
             default => '%Y-%m',
         };
 
-        $dateColumn = "DATE_FORMAT(payment_date, '{$format}')";
+        $isSqlite = config('database.default') === 'sqlite';
+        $dateFn = $isSqlite
+            ? fn (string $col) => "strftime('{$format}', {$col})"
+            : fn (string $col) => "DATE_FORMAT({$col}, '{$format}')";
+
+        $dateColumn = $dateFn('payment_date');
         $paid = Transaction::whereHas('invoice', function ($query) use ($projectIds) {
             $query->whereHasMorph('invoiceable', [PurchaseOrder::class, Spk::class], function ($q) use ($projectIds) {
                 $q->whereIn('project_id', $projectIds);
@@ -281,7 +286,7 @@ class DashboardReportController extends Controller
         foreach ([PurchaseOrder::class => 'date', Spk::class => 'created_at'] as $model => $dateField) {
             $rows = $model::whereIn('project_id', $projectIds)
                 ->whereIn('status', ['APPROVED', 'COMPLETED'])
-                ->selectRaw("DATE_FORMAT({$dateField}, '{$format}') as period, SUM(total_amount) as amount")
+                ->selectRaw("{$dateFn($dateField)} as period, SUM(total_amount) as amount")
                 ->groupBy('period')
                 ->orderBy('period')
                 ->get();

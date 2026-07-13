@@ -7,14 +7,17 @@ use App\Models\ApprovalLog;
 use App\Models\FundRequest;
 use App\Models\Transaction;
 use App\Support\WorkflowState;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class FundRequestController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        return response()->json(FundRequest::with(['project', 'transactions'])->latest()->get());
+        $perPage = min($request->query('per_page', 15), 100);
+
+        return response()->json(FundRequest::with(['project', 'transactions'])->latest()->paginate($perPage));
     }
 
     public function store(Request $request)
@@ -28,7 +31,7 @@ class FundRequestController extends Controller
 
         $fundRequest = FundRequest::create($validated + [
             'status' => 'PENDING_APPROVAL',
-            'requested_by' => $request->user()->id ?? 1,
+            'requested_by' => $request->user()->id,
         ]);
         $this->log($request, $fundRequest, 'SUBMIT');
 
@@ -37,35 +40,50 @@ class FundRequestController extends Controller
 
     public function approve(Request $request, $id)
     {
-        $fundRequest = FundRequest::findOrFail($id);
-        WorkflowState::require(
-            $fundRequest->status,
-            ['PENDING_APPROVAL'],
-            'Permohonan dana harus berstatus PENDING_APPROVAL sebelum disetujui.'
-        );
-        $fundRequest->update([
-            'status' => 'APPROVED',
-            'approved_by' => $request->user()->id ?? 1,
-            'approved_at' => now(),
-        ]);
-        $this->log($request, $fundRequest, 'APPROVE');
+        $fundRequest = DB::transaction(function () use ($request, $id) {
+            $fundRequest = FundRequest::where('id', $id)->lockForUpdate()->firstOrFail();
+
+            if ($fundRequest->status !== 'PENDING_APPROVAL') {
+                return response()->json(['message' => 'Permohonan dana harus berstatus PENDING_APPROVAL sebelum disetujui.'], 422);
+            }
+
+            $fundRequest->update([
+                'status' => 'APPROVED',
+                'approved_by' => $request->user()->id,
+                'approved_at' => now(),
+            ]);
+            $this->log($request, $fundRequest, 'APPROVE');
+
+            return $fundRequest->fresh();
+        });
+
+        if ($fundRequest instanceof JsonResponse) {
+            return $fundRequest;
+        }
 
         return response()->json(['message' => 'Permohonan dana disetujui.', 'data' => $fundRequest]);
     }
 
     public function reject(Request $request, $id)
     {
-        $fundRequest = FundRequest::findOrFail($id);
-        WorkflowState::require(
-            $fundRequest->status,
-            ['PENDING_APPROVAL'],
-            'Permohonan dana harus berstatus PENDING_APPROVAL sebelum ditolak.'
-        );
+        $result = DB::transaction(function () use ($request, $id) {
+            $fundRequest = FundRequest::where('id', $id)->lockForUpdate()->firstOrFail();
 
-        $fundRequest->update(['status' => 'REJECTED']);
-        $this->log($request, $fundRequest, 'REJECT');
+            if ($fundRequest->status !== 'PENDING_APPROVAL') {
+                return response()->json(['message' => 'Permohonan dana harus berstatus PENDING_APPROVAL sebelum ditolak.'], 422);
+            }
 
-        return response()->json(['message' => 'Permohonan dana ditolak.', 'data' => $fundRequest]);
+            $fundRequest->update(['status' => 'REJECTED']);
+            $this->log($request, $fundRequest, 'REJECT');
+
+            return $fundRequest->fresh();
+        });
+
+        if ($result instanceof JsonResponse) {
+            return $result;
+        }
+
+        return response()->json(['message' => 'Permohonan dana ditolak.', 'data' => $result]);
     }
 
     public function pay(Request $request, $id)
@@ -149,7 +167,7 @@ class FundRequestController extends Controller
         ApprovalLog::create([
             'record_type' => FundRequest::class,
             'record_id' => $fundRequest->id,
-            'user_id' => $request->user()->id ?? 1,
+            'user_id' => $request->user()->id,
             'action' => $action,
         ]);
     }

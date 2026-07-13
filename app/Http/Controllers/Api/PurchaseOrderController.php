@@ -4,8 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\ApprovalLog;
-use App\Models\PurchaseOrder;
 use App\Models\PoItem;
+use App\Models\PurchaseOrder;
 use App\Models\RabBudget;
 use App\Support\WorkflowState;
 use Illuminate\Http\Request;
@@ -13,9 +13,11 @@ use Illuminate\Support\Facades\DB;
 
 class PurchaseOrderController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        return response()->json(PurchaseOrder::with(['project', 'items.rabBudget'])->get());
+        $perPage = min($request->query('per_page', 15), 100);
+
+        return response()->json(PurchaseOrder::with(['project', 'items.rabBudget'])->latest()->paginate($perPage));
     }
 
     public function store(Request $request)
@@ -60,13 +62,13 @@ class PurchaseOrderController extends Controller
         try {
             $po = DB::transaction(function () use ($validated, $request) {
                 $po = PurchaseOrder::create([
-                'project_id' => $validated['project_id'],
-                'po_number' => $validated['po_number'],
-                'date' => $validated['date'],
-                'supplier_name' => $validated['supplier_name'],
-                'payment_terms' => $validated['payment_terms'],
-                'status' => 'DRAFT',
-                'created_by' => $request->user()->id ?? 1,
+                    'project_id' => $validated['project_id'],
+                    'po_number' => $validated['po_number'],
+                    'date' => $validated['date'],
+                    'supplier_name' => $validated['supplier_name'],
+                    'payment_terms' => $validated['payment_terms'],
+                    'status' => 'DRAFT',
+                    'created_by' => $request->user()->id,
                 ]);
 
                 $subtotal = 0;
@@ -96,7 +98,7 @@ class PurchaseOrderController extends Controller
 
             return response()->json([
                 'message' => 'Draft Purchase Order (PO) berhasil dibuat.',
-                'data' => $po->load('items')
+                'data' => $po->load('items'),
             ], 201);
         } catch (\Throwable $e) {
             return response()->json(['message' => 'Gagal membuat PO.', 'error' => $e->getMessage()], 500);
@@ -114,6 +116,7 @@ class PurchaseOrderController extends Controller
             );
             $po->update(['status' => 'PENDING_APPROVAL']);
             $this->log($request, $po, 'SUBMIT');
+
             return $po;
         });
 
@@ -131,9 +134,10 @@ class PurchaseOrderController extends Controller
             );
             $po->update([
                 'status' => 'APPROVED',
-                'approved_by' => $request->user()->id ?? 1,
+                'approved_by' => $request->user()->id,
             ]);
             $this->log($request, $po, 'APPROVE');
+
             return $po;
         });
 
@@ -151,6 +155,7 @@ class PurchaseOrderController extends Controller
             );
             $po->update(['status' => 'REJECTED']);
             $this->log($request, $po, 'REJECT', $request->input('notes'));
+
             return $po;
         });
 
@@ -162,7 +167,7 @@ class PurchaseOrderController extends Controller
         ApprovalLog::create([
             'record_type' => PurchaseOrder::class,
             'record_id' => $po->id,
-            'user_id' => $request->user()->id ?? 1,
+            'user_id' => $request->user()->id,
             'action' => $action,
             'notes' => $notes,
         ]);

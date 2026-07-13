@@ -16,10 +16,12 @@ use Illuminate\Support\Facades\DB;
 
 class GoodsReceiptController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
+        $perPage = min($request->query('per_page', 15), 100);
+
         return response()->json(
-            GoodsReceipt::with(['purchaseOrder.project', 'purchaseOrder.items', 'items.poItem'])->get()
+            GoodsReceipt::with(['purchaseOrder.project', 'purchaseOrder.items', 'items.poItem'])->latest()->paginate($perPage)
         );
     }
 
@@ -34,12 +36,12 @@ class GoodsReceiptController extends Controller
     {
         $validated = $request->validate([
             'purchase_order_id' => 'required|exists:purchase_orders,id',
-            'receipt_number'    => 'required|string|unique:goods_receipts,receipt_number',
-            'receipt_date'      => 'required|date',
+            'receipt_number' => 'required|string|unique:goods_receipts,receipt_number',
+            'receipt_date' => 'required|date',
             'delivery_note_number' => 'nullable|string',
-            'receiver_name'     => 'required|string',
-            'notes'             => 'nullable|string',
-            'items'             => 'nullable|array|min:1',
+            'receiver_name' => 'required|string',
+            'notes' => 'nullable|string',
+            'items' => 'nullable|array|min:1',
             'items.*.po_item_id' => 'required_with:items|integer|exists:po_items,id',
             'items.*.quantity_received' => 'required_with:items|numeric|min:0.01',
         ]);
@@ -88,7 +90,7 @@ class GoodsReceiptController extends Controller
             'message' => $gr->purchaseOrder->status === 'RECEIVED'
                 ? 'Penerimaan barang lengkap dan stok telah diperbarui.'
                 : 'Penerimaan barang sebagian berhasil dicatat dan stok telah diperbarui.',
-            'data' => $gr->load(['purchaseOrder', 'items.poItem'])
+            'data' => $gr->load(['purchaseOrder', 'items.poItem']),
         ], 201);
     }
 
@@ -162,7 +164,7 @@ class GoodsReceiptController extends Controller
     private function increaseInventory(PurchaseOrder $po, PoItem $poItem, float $quantity): void
     {
         $rabBudget = $poItem->rab_budget_id ? RabBudget::withTrashed()->find($poItem->rab_budget_id) : null;
-        
+
         $stock = InventoryStock::query()
             ->where('project_id', $po->project_id)
             ->when($poItem->rab_budget_id, function ($q) use ($poItem) {

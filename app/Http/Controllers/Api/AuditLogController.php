@@ -12,11 +12,11 @@ class AuditLogController extends Controller
     {
         $query = AuditLog::with('user');
 
-        if ($table = $request->get('table_name')) {
-            $query->where('table_name', $table);
+        if ($type = $request->get('auditable_type')) {
+            $query->where('auditable_type', $type);
         }
-        if ($recordId = $request->get('record_id')) {
-            $query->where('record_id', $recordId);
+        if ($recordId = $request->get('auditable_id')) {
+            $query->where('auditable_id', $recordId);
         }
         if ($userId = $request->get('user_id')) {
             $query->where('user_id', $userId);

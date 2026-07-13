@@ -16,10 +16,12 @@ use Illuminate\Validation\Rule;
 
 class InvoiceController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
+        $perPage = min($request->query('per_page', 15), 100);
+
         return response()->json(
-            Invoice::with(['invoiceable', 'transactions'])->get()
+            Invoice::with(['invoiceable', 'transactions'])->latest()->paginate($perPage)
         );
     }
 
@@ -27,11 +29,11 @@ class InvoiceController extends Controller
     {
         $validated = $request->validate([
             'invoiceable_type' => ['required', 'string', Rule::in([PurchaseOrder::class, Spk::class])],
-            'invoiceable_id'   => 'required|integer',
-            'invoice_number'   => 'required|string|unique:invoices,invoice_number',
-            'invoice_date'     => 'required|date',
-            'due_date'         => 'nullable|date',
-            'opname_id'        => [
+            'invoiceable_id' => 'required|integer',
+            'invoice_number' => 'required|string|unique:invoices,invoice_number',
+            'invoice_date' => 'required|date',
+            'due_date' => 'nullable|date',
+            'opname_id' => [
                 Rule::requiredIf(fn () => $request->input('invoiceable_type') === Spk::class),
                 'nullable',
                 'integer',
@@ -98,7 +100,7 @@ class InvoiceController extends Controller
 
         return response()->json([
             'message' => 'Invoice berhasil dibuat dan menunggu verifikasi engineer.',
-            'data' => $invoice
+            'data' => $invoice,
         ], 201);
     }
 
@@ -113,6 +115,7 @@ class InvoiceController extends Controller
             );
             $invoice->update(['status' => 'ENGINEER_VERIFIED']);
             $this->log($request, $invoice, 'ENGINEER_VERIFY');
+
             return $invoice;
         });
 
@@ -130,6 +133,7 @@ class InvoiceController extends Controller
             );
             $invoice->update(['status' => 'PENDING_APPROVAL']);
             $this->log($request, $invoice, 'FINANCE_VERIFY');
+
             return $invoice;
         });
 
@@ -147,12 +151,13 @@ class InvoiceController extends Controller
             );
             $invoice->update(['status' => 'UNPAID']);
             $this->log($request, $invoice, 'MANAGER_APPROVE');
+
             return $invoice;
         });
 
         return response()->json([
             'message' => 'Invoice telah disetujui Manajer dan siap dibayar.',
-            'data' => $invoice
+            'data' => $invoice,
         ]);
     }
 
@@ -200,7 +205,7 @@ class InvoiceController extends Controller
 
         return response()->json([
             'message' => 'Pembayaran dan bukti bayar berhasil dicatat. Status Invoice: PAID.',
-            'data' => $invoice->load('transactions')
+            'data' => $invoice->load('transactions'),
         ]);
     }
 

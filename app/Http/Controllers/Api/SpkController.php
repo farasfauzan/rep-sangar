@@ -11,9 +11,11 @@ use Illuminate\Support\Facades\DB;
 
 class SpkController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        return response()->json(Spk::with(['project'])->get());
+        $perPage = min($request->query('per_page', 15), 100);
+
+        return response()->json(Spk::with(['project'])->latest()->paginate($perPage));
     }
 
     public function store(Request $request)
@@ -37,12 +39,12 @@ class SpkController extends Controller
             'total_amount' => $validated['subtotal'] + $tax,
             'payment_terms' => $validated['payment_terms'],
             'status' => 'DRAFT',
-            'created_by' => $request->user()->id ?? 1,
+            'created_by' => $request->user()->id,
         ]);
 
         return response()->json([
             'message' => 'Draft Surat Perintah Kerja (SPK) berhasil dibuat.',
-            'data' => $spk
+            'data' => $spk,
         ], 201);
     }
 
@@ -57,6 +59,7 @@ class SpkController extends Controller
             );
             $spk->update(['status' => 'PENDING_APPROVAL']);
             $this->log($request, $spk, 'SUBMIT');
+
             return $spk;
         });
 
@@ -74,9 +77,10 @@ class SpkController extends Controller
             );
             $spk->update([
                 'status' => 'APPROVED',
-                'approved_by' => $request->user()->id ?? 1,
+                'approved_by' => $request->user()->id,
             ]);
             $this->log($request, $spk, 'APPROVE');
+
             return $spk;
         });
 
@@ -94,6 +98,7 @@ class SpkController extends Controller
             );
             $spk->update(['status' => 'REJECTED']);
             $this->log($request, $spk, 'REJECT', $request->input('notes'));
+
             return $spk;
         });
 
@@ -105,7 +110,7 @@ class SpkController extends Controller
         ApprovalLog::create([
             'record_type' => Spk::class,
             'record_id' => $spk->id,
-            'user_id' => $request->user()->id ?? 1,
+            'user_id' => $request->user()->id,
             'action' => $action,
             'notes' => $notes,
         ]);
