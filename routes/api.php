@@ -26,11 +26,16 @@ use App\Http\Controllers\Api\EfakturController;
 use App\Http\Controllers\Api\FinancialReportController;
 use App\Http\Controllers\Api\RabImportController;
 use App\Http\Controllers\Api\BankStatementController;
+use App\Http\Controllers\Api\WorkflowNotificationController;
 
 Route::middleware(['auth:web', 'verified'])->withoutMiddleware([\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class])->group(function () {
     Route::get('/user', function (Request $request) {
         return $request->user();
     });
+
+    Route::get('/notifications', [WorkflowNotificationController::class, 'index']);
+    Route::put('/notifications/read-all', [WorkflowNotificationController::class, 'markAllRead']);
+    Route::put('/notifications/{id}/read', [WorkflowNotificationController::class, 'markRead']);
 
     // ─── Projects ──────────────────────────────────────────────────────
     Route::middleware('role:ADMIN,LAPANGAN,ENGINEER,PURCHASING_LEGAL,VERIFIKATOR_KEU,MGR_KOMERSIAL,KEU_KANTOR,PAJAK,ACCOUNTING')->group(function () {

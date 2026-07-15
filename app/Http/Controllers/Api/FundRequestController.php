@@ -9,6 +9,7 @@ use App\Models\FundRequest;
 use App\Models\FundRequestAttachment;
 use App\Models\GeneralLedger;
 use App\Models\Transaction;
+use App\Services\WorkflowNotificationService;
 use App\Support\WorkflowState;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,6 +19,10 @@ use Illuminate\Support\Facades\Storage;
 
 class FundRequestController extends Controller
 {
+    public function __construct(private readonly WorkflowNotificationService $notifications)
+    {
+    }
+
     public function index(Request $request)
     {
         $perPage = min($request->query('per_page', 15), 100);
@@ -45,6 +50,13 @@ class FundRequestController extends Controller
         ]);
         $this->log($request, $fundRequest, 'SUBMIT');
 
+        $this->notifications->toRole(
+            'VERIFIKATOR_KEU',
+            'Permohonan dana menunggu verifikasi',
+            "Permohonan dana {$fundRequest->request_number} dikirim untuk verifikasi keuangan.",
+            '/approval'
+        );
+
         return response()->json(['message' => 'Permohonan dana dikirim ke Verifikator Keuangan.', 'data' => $fundRequest], 201);
     }
 
@@ -62,6 +74,13 @@ class FundRequestController extends Controller
 
             return $fundRequest;
         });
+
+        $this->notifications->toRole(
+            'MGR_KOMERSIAL',
+            'Permohonan dana menunggu approval',
+            "Permohonan dana {$fundRequest->request_number} sudah diverifikasi dan menunggu persetujuan Manajer.",
+            '/approval'
+        );
 
         return response()->json(['message' => 'Permohonan dana terverifikasi dan menunggu approval Manajer.', 'data' => $fundRequest]);
     }
@@ -89,6 +108,14 @@ class FundRequestController extends Controller
             return $fundRequest;
         }
 
+        $this->notifications->toRole(
+            'KEU_KANTOR',
+            'Permohonan dana siap dibayar',
+            "Permohonan dana {$fundRequest->request_number} disetujui dan siap dieksekusi pembayarannya.",
+            '/payment'
+        );
+        $this->notifications->toUser($fundRequest->requested_by, 'Permohonan dana disetujui', "Permohonan dana {$fundRequest->request_number} sudah disetujui dan menunggu pembayaran.", '/fund-requests');
+
         return response()->json(['message' => 'Permohonan dana disetujui.', 'data' => $fundRequest]);
     }
 
@@ -111,6 +138,8 @@ class FundRequestController extends Controller
         if ($result instanceof JsonResponse) {
             return $result;
         }
+
+        $this->notifications->toUser($result->requested_by, 'Permohonan dana ditolak', "Permohonan dana {$result->request_number} ditolak. Periksa catatan verifikator atau Manajer.", '/fund-requests');
 
         return response()->json(['message' => 'Permohonan dana ditolak.', 'data' => $result]);
     }
@@ -172,6 +201,8 @@ class FundRequestController extends Controller
             return $fundRequest;
         });
 
+        $this->notifications->toUser($fundRequest->requested_by, 'Dana proyek sudah dibayar', "Permohonan dana {$fundRequest->request_number} sudah dibayar. Lengkapi dan kirim LPJ setelah realisasi.", '/fund-requests');
+
         return response()->json(['message' => 'Dana proyek dibayar dan bukti dicatat.', 'data' => $fundRequest->load('transactions')]);
     }
 
@@ -204,6 +235,13 @@ class FundRequestController extends Controller
         ]);
         $this->log($request, $fundRequest, 'LPJ_SUBMIT');
 
+        $this->notifications->toRole(
+            'VERIFIKATOR_KEU',
+            'LPJ menunggu verifikasi',
+            "LPJ untuk permohonan dana {$fundRequest->request_number} dikirim untuk verifikasi keuangan.",
+            '/approval'
+        );
+
         return response()->json(['message' => 'LPJ dikirim untuk verifikasi.', 'data' => $fundRequest]);
     }
 
@@ -222,6 +260,13 @@ class FundRequestController extends Controller
         ]);
         $this->log($request, $fundRequest, 'LPJ_VERIFY');
 
+        $this->notifications->toRole(
+            'MGR_KOMERSIAL',
+            'LPJ menunggu approval',
+            "LPJ untuk permohonan dana {$fundRequest->request_number} sudah diverifikasi dan menunggu persetujuan Manajer.",
+            '/approval'
+        );
+
         return response()->json(['message' => 'LPJ diverifikasi dan menunggu approval Manajer.', 'data' => $fundRequest]);
     }
 
@@ -235,6 +280,8 @@ class FundRequestController extends Controller
             'lpj_approved_at' => now(),
         ]);
         $this->log($request, $fundRequest, 'LPJ_APPROVE');
+
+        $this->notifications->toUser($fundRequest->requested_by, 'LPJ disetujui', "LPJ untuk permohonan dana {$fundRequest->request_number} sudah disetujui. Workflow selesai.", '/fund-requests');
 
         return response()->json(['message' => 'LPJ disetujui dan workflow permohonan dana selesai.', 'data' => $fundRequest]);
     }

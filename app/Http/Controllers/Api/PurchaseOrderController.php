@@ -8,6 +8,7 @@ use App\Models\PoAttachment;
 use App\Models\PoItem;
 use App\Models\PurchaseOrder;
 use App\Models\RabBudget;
+use App\Services\WorkflowNotificationService;
 use App\Support\WorkflowState;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -15,6 +16,10 @@ use Illuminate\Support\Facades\Storage;
 
 class PurchaseOrderController extends Controller
 {
+    public function __construct(private readonly WorkflowNotificationService $notifications)
+    {
+    }
+
     public function index(Request $request)
     {
         $perPage = min($request->query('per_page', 15), 100);
@@ -193,8 +198,19 @@ class PurchaseOrderController extends Controller
                 return $po;
             });
 
+            if ($po->po_level === 'PROJECT') {
+                $this->notifications->toRole(
+                    'ENGINEER',
+                    'PO Proyek menunggu routing',
+                    "PO {$po->po_number} baru dibuat. Verifikasi lalu arahkan ke PO Supplier atau SPK.",
+                    '/approval'
+                );
+            }
+
             return response()->json([
-                'message' => 'Draft Purchase Order (PO) berhasil dibuat.',
+                'message' => $po->po_level === 'PROJECT'
+                    ? 'Draft PO Proyek dibuat dan dikirim ke Engineer untuk routing.'
+                    : 'Draft PO Supplier berhasil dibuat. Kirim untuk approval setelah data lengkap.',
                 'data' => $po->load('items'),
             ], 201);
         } catch (\Throwable $e) {
@@ -284,7 +300,14 @@ class PurchaseOrderController extends Controller
             return $po;
         });
 
-        return response()->json(['message' => 'PO dikirim untuk approval.', 'data' => $po]);
+        $this->notifications->toRole(
+            'MGR_KOMERSIAL',
+            'PO Supplier menunggu approval',
+            "PO {$po->po_number} dikirim untuk persetujuan Manajer Komersial.",
+            '/approval'
+        );
+
+        return response()->json(['message' => 'PO dikirim ke Manajer Komersial untuk approval.', 'data' => $po]);
     }
 
     public function approve(Request $request, $id)
@@ -310,7 +333,15 @@ class PurchaseOrderController extends Controller
             return $po;
         });
 
-        return response()->json(['message' => 'PO disetujui.', 'data' => $po]);
+        $this->notifications->toRole(
+            'LAPANGAN',
+            'PO Supplier disetujui',
+            "PO {$po->po_number} sudah disetujui. Lanjutkan penerimaan barang saat barang tiba.",
+            '/goods-receipts'
+        );
+        $this->notifications->toUser($po->created_by, 'PO Supplier disetujui', "PO {$po->po_number} telah disetujui Manajer Komersial.", '/po');
+
+        return response()->json(['message' => 'PO disetujui dan diteruskan ke proses penerimaan barang.', 'data' => $po]);
     }
 
     public function reject(Request $request, $id)
@@ -327,6 +358,8 @@ class PurchaseOrderController extends Controller
 
             return $po;
         });
+
+        $this->notifications->toUser($po->created_by, 'PO Supplier ditolak', "PO {$po->po_number} ditolak. Periksa catatan approval dan revisi dokumen.", "/purchase-orders/{$po->id}");
 
         return response()->json(['message' => 'PO ditolak.', 'data' => $po]);
     }
@@ -410,7 +443,17 @@ class PurchaseOrderController extends Controller
             return $po;
         });
 
-        return response()->json(['message' => 'PO berhasil di-route.', 'data' => $po]);
+        $destination = $po->routed_to === 'SPK' ? 'SPK' : 'PO Supplier';
+        $url = $po->routed_to === 'SPK' ? '/spk' : '/po';
+        $this->notifications->toRole(
+            'PURCHASING_LEGAL',
+            "PO Proyek diteruskan ke {$destination}",
+            "PO {$po->po_number} sudah dirouting Engineer. Buat dokumen {$destination} dari PO tersebut.",
+            $url
+        );
+        $this->notifications->toUser($po->created_by, 'PO Proyek sudah dirouting', "PO {$po->po_number} diteruskan Engineer ke {$destination}.", $url);
+
+        return response()->json(['message' => "PO berhasil diteruskan ke {$destination}.", 'data' => $po]);
     }
 
     private function log(Request $request, PurchaseOrder $po, string $action, ?string $notes = null): void

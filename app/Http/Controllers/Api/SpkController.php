@@ -6,12 +6,17 @@ use App\Http\Controllers\Controller;
 use App\Models\ApprovalLog;
 use App\Models\PurchaseOrder;
 use App\Models\Spk;
+use App\Services\WorkflowNotificationService;
 use App\Support\WorkflowState;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class SpkController extends Controller
 {
+    public function __construct(private readonly WorkflowNotificationService $notifications)
+    {
+    }
+
     public function index(Request $request)
     {
         $perPage = min($request->query('per_page', 15), 100);
@@ -98,7 +103,14 @@ class SpkController extends Controller
             return $spk;
         });
 
-        return response()->json(['message' => 'SPK dikirim untuk approval.', 'data' => $spk]);
+        $this->notifications->toRole(
+            'MGR_KOMERSIAL',
+            'SPK menunggu approval',
+            "SPK {$spk->spk_number} dikirim untuk persetujuan Manajer Komersial.",
+            '/approval'
+        );
+
+        return response()->json(['message' => 'SPK dikirim ke Manajer Komersial untuk approval.', 'data' => $spk]);
     }
 
     public function approve(Request $request, $id)
@@ -119,7 +131,15 @@ class SpkController extends Controller
             return $spk;
         });
 
-        return response()->json(['message' => 'SPK disetujui.', 'data' => $spk]);
+        $this->notifications->toRole(
+            'LAPANGAN',
+            'SPK disetujui',
+            "SPK {$spk->spk_number} sudah disetujui. Pekerjaan dapat dipantau melalui opname.",
+            '/opname'
+        );
+        $this->notifications->toUser($spk->created_by, 'SPK disetujui', "SPK {$spk->spk_number} telah disetujui Manajer Komersial.", '/spk');
+
+        return response()->json(['message' => 'SPK disetujui dan diteruskan ke proses opname.', 'data' => $spk]);
     }
 
     public function reject(Request $request, $id)
@@ -136,6 +156,8 @@ class SpkController extends Controller
 
             return $spk;
         });
+
+        $this->notifications->toUser($spk->created_by, 'SPK ditolak', "SPK {$spk->spk_number} ditolak. Periksa catatan approval dan revisi dokumen.", '/spk');
 
         return response()->json(['message' => 'SPK ditolak.', 'data' => $spk]);
     }

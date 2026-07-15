@@ -12,6 +12,7 @@ use App\Models\Opname;
 use App\Models\PurchaseOrder;
 use App\Models\Spk;
 use App\Models\Transaction;
+use App\Services\WorkflowNotificationService;
 use App\Support\WorkflowState;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -20,6 +21,10 @@ use Illuminate\Validation\Rule;
 
 class InvoiceController extends Controller
 {
+    public function __construct(private readonly WorkflowNotificationService $notifications)
+    {
+    }
+
     public function index(Request $request)
     {
         $perPage = min($request->query('per_page', 15), 100);
@@ -102,6 +107,13 @@ class InvoiceController extends Controller
             ]);
         });
 
+        $this->notifications->toRole(
+            'ENGINEER',
+            'Invoice menunggu verifikasi Engineer',
+            "Invoice {$invoice->invoice_number} baru dibuat dan perlu diverifikasi di menu Approval.",
+            '/approval'
+        );
+
         return response()->json([
             'message' => 'Invoice berhasil dibuat dan menunggu verifikasi engineer.',
             'data' => $invoice,
@@ -122,6 +134,13 @@ class InvoiceController extends Controller
 
             return $invoice;
         });
+
+        $this->notifications->toRole(
+            'VERIFIKATOR_KEU',
+            'Invoice menunggu verifikasi Keuangan',
+            "Invoice {$invoice->invoice_number} sudah diverifikasi Engineer dan menunggu verifikasi dokumen keuangan.",
+            '/approval'
+        );
 
         return response()->json(['message' => 'Invoice lolos verifikasi engineer.', 'data' => $invoice]);
     }
@@ -146,6 +165,13 @@ class InvoiceController extends Controller
             return $invoice;
         });
 
+        $this->notifications->toRole(
+            'MGR_KOMERSIAL',
+            'Invoice menunggu approval Manajer',
+            "Invoice {$invoice->invoice_number} sudah lolos verifikasi keuangan dan menunggu approval.",
+            '/approval'
+        );
+
         return response()->json(['message' => 'Invoice lolos verifikasi finance dan menunggu approval manajer.', 'data' => $invoice]);
     }
 
@@ -166,6 +192,13 @@ class InvoiceController extends Controller
 
             return $invoice;
         });
+
+        $this->notifications->toRole(
+            'VERIFIKATOR_KEU',
+            'Invoice menunggu finalisasi cashflow',
+            "Invoice {$invoice->invoice_number} sudah disetujui Manajer. Finalisasi cashflow sebelum pembayaran.",
+            '/approval'
+        );
 
         return response()->json([
             'message' => 'Invoice disetujui Manajer dan menunggu finalisasi cashflow.',
@@ -228,6 +261,13 @@ class InvoiceController extends Controller
             return $invoice;
         });
 
+        $this->notifications->toRole(
+            'PURCHASING_LEGAL',
+            'Pembayaran invoice dicatat',
+            "Pembayaran untuk invoice {$invoice->invoice_number} sudah dicatat dengan status {$invoice->status}.",
+            '/invoicing'
+        );
+
         return response()->json([
             'message' => 'Pembayaran dan bukti bayar berhasil dicatat. Status Invoice: PAID.',
             'data' => $invoice->load('transactions'),
@@ -254,6 +294,15 @@ class InvoiceController extends Controller
 
             return $invoice;
         });
+
+        if ($invoice->cashflow_status === 'APPROVED') {
+            $this->notifications->toRole(
+                'KEU_KANTOR',
+                'Invoice siap dibayar',
+                "Cashflow invoice {$invoice->invoice_number} disetujui. Dokumen siap dieksekusi pembayarannya.",
+                '/payment'
+            );
+        }
 
         return response()->json([
             'message' => 'Status cashflow invoice diperbarui.',

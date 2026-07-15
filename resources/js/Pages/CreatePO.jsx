@@ -139,8 +139,8 @@ export default function CreatePO() {
                 }));
             }
 
-            await api.post('/api/pos', payload);
-            setMessage('PO berhasil dibuat!');
+            const response = await api.post('/api/pos', payload);
+            setMessage(response?.message || 'PO berhasil dibuat.');
             reset();
             setData('items', []);
         } catch (err) {

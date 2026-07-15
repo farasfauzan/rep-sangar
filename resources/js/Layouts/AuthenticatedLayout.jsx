@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import ApplicationLogo from '@/Components/ApplicationLogo';
 import Dropdown from '@/Components/Dropdown';
+import WorkflowNotifications from '@/Components/WorkflowNotifications';
 import { Link, usePage } from '@inertiajs/react';
 
 export default function Authenticated({ header, children }) {
@@ -266,7 +267,8 @@ export default function Authenticated({ header, children }) {
                             <div className="hidden lg:flex lg:items-center" />
 
                             {/* User dropdown - right side */}
-                            <div className="flex items-center sm:ms-6 ml-auto">
+                            <div className="flex items-center gap-2 sm:ms-6 ml-auto">
+                                <WorkflowNotifications />
                                 <div className="ms-3 relative">
                                     <Dropdown>
                                         <Dropdown.Trigger>
