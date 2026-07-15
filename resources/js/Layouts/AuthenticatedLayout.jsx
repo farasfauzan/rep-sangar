@@ -40,6 +40,7 @@ export default function Authenticated({ header, children }) {
             'posting-jurnal': 'Posting Jurnal',
             'laporan-keuangan': 'Laporan Keuangan',
             'audit-trail': 'Audit Trail',
+            'bank-statements': 'Rekening Koran',
             admin: 'Kelola User',
             suppliers: 'Supplier',
             create: 'Tambah Supplier',
@@ -68,6 +69,7 @@ export default function Authenticated({ header, children }) {
                     { name: 'Approval', route: 'approval' },
                     { name: 'LPJ & Permohonan', route: 'fund-requests' },
                     { name: 'Pembayaran', route: 'payment' },
+                    { name: 'Rekening Koran', route: 'bank-statements' },
                     { name: 'Kelola User', route: 'admin.users' },
                 ];
             case 'LAPANGAN':
@@ -126,6 +128,7 @@ export default function Authenticated({ header, children }) {
                     { name: 'Posting Jurnal', route: 'posting-jurnal' },
                     { name: 'Laporan Keuangan', route: 'laporan-keuangan' },
                     { name: 'Audit Trail', route: 'audit-trail' },
+                    { name: 'Rekening Koran', route: 'bank-statements' },
                 ];
             default:
                 return [{ name: 'Dashboard', route: 'dashboard' }];

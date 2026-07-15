@@ -116,7 +116,8 @@ class SpkControllerTest extends TestCase
     public function test_submit_transitions_from_draft(): void
     {
         $user = $this->actingAsRole('PURCHASING_LEGAL');
-        $spk = Spk::factory()->create(['status' => 'DRAFT', 'created_by' => $user->id]);
+        $source = \App\Models\PurchaseOrder::factory()->create(['po_level' => 'PROJECT', 'status' => 'ROUTED', 'routed_to' => 'SPK']);
+        $spk = Spk::factory()->create(['status' => 'DRAFT', 'source_po_id' => $source->id, 'created_by' => $user->id]);
 
         $this->putJson("/api/spks/{$spk->id}/submit")
             ->assertOk()

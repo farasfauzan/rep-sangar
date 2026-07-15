@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import { useApi } from '@/hooks/useApi';
 import { useProjects } from '@/hooks/useProjects';
 import { useToast } from '@/Components/ui/Toast';
-import InputPromptModal from '@/Components/ui/InputPromptModal';
 
 const money = (value) => `Rp ${Number(value || 0).toLocaleString('id-ID')}`;
 const requestNumber = () => `PD-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${Date.now().toString().slice(-4)}`;
@@ -14,7 +13,8 @@ export default function FundRequestPage() {
     const [funds, setFunds] = useState([]);
     const [loading, setLoading] = useState(true);
     const [form, setForm] = useState({ project_id: '', request_number: requestNumber(), amount: '', description: '' });
-    const [promptState, setPromptState] = useState({ open: false, fund: null, defaultValue: '' });
+    const [lpjFiles, setLpjFiles] = useState({});
+    const [lpjNotes, setLpjNotes] = useState({});
     const api = useApi();
     const toast = useToast();
 
@@ -50,15 +50,22 @@ export default function FundRequestPage() {
     };
 
     const submitLpj = async (fund) => {
-        setPromptState({ open: true, fund, defaultValue: fund.lpj_notes || 'LPJ sudah lengkap.' });
-    };
-
-    const handlePromptSubmit = async (lpj_notes) => {
-        const fund = promptState.fund;
-        setPromptState({ open: false, fund: null, defaultValue: '' });
+        const file = lpjFiles[fund.id];
+        if (!file) {
+            toast.error('Pilih minimal satu file LPJ terlebih dahulu.');
+            return;
+        }
         try {
-            await api.put(`/api/fund-requests/${fund.id}/lpj`, { lpj_notes });
+            const formData = new FormData();
+            formData.append('doc_type', 'LPJ');
+            formData.append('file', file);
+            await api.post(`/api/fund-requests/${fund.id}/attachments`, formData);
+            await api.put(`/api/fund-requests/${fund.id}/lpj`, {
+                lpj_notes: lpjNotes[fund.id] || 'LPJ dan bukti belanja proyek.',
+                lpj_items: [{ description: fund.description || 'Realisasi dana proyek', amount: Number(fund.amount), category: 'OPERASIONAL' }],
+            });
             await fetchData();
+            toast.success('LPJ dikirim ke Verifikator Keuangan.');
         } catch (err) {
             // toast shown by useApi
         }
@@ -119,8 +126,12 @@ export default function FundRequestPage() {
                                                 <td className="px-4 py-3 text-sm text-gray-600">{fund.status}</td>
                                                 <td className="px-4 py-3 text-sm">
                                                     {fund.status === 'PAID' ? (
-                                                        <button onClick={() => submitLpj(fund)} className="rounded bg-emerald-600 px-3 py-1 text-sm text-white shadow hover:bg-emerald-700">Kirim LPJ</button>
-                                                    ) : '-'}
+                                                        <div className="flex min-w-[280px] flex-col gap-2">
+                                                            <input type="file" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls" onChange={(e) => setLpjFiles((current) => ({ ...current, [fund.id]: e.target.files?.[0] }))} className="text-xs" />
+                                                            <input value={lpjNotes[fund.id] || ''} onChange={(e) => setLpjNotes((current) => ({ ...current, [fund.id]: e.target.value }))} placeholder="Catatan LPJ" className="rounded border-gray-300 text-xs" />
+                                                            <button onClick={() => submitLpj(fund)} className="rounded bg-emerald-600 px-3 py-1 text-sm text-white shadow hover:bg-emerald-700">Kirim LPJ</button>
+                                                        </div>
+                                                    ) : fund.status === 'LPJ_APPROVED' ? 'Selesai' : 'Menunggu proses'}
                                                 </td>
                                             </tr>
                                         )) : <tr><td colSpan="5" className="px-4 py-4 text-center text-sm text-gray-500">Belum ada permohonan dana.</td></tr>}
@@ -132,16 +143,6 @@ export default function FundRequestPage() {
                 </div>
             </div>
 
-            <InputPromptModal
-                open={promptState.open}
-                onClose={() => setPromptState({ open: false, fund: null, defaultValue: '' })}
-                onSubmit={handlePromptSubmit}
-                title="Catatan LPJ"
-                message="Masukkan catatan LPJ untuk permohonan dana ini."
-                defaultValue={promptState.defaultValue}
-                inputLabel="Catatan LPJ"
-                submitText="Kirim LPJ"
-            />
         </AuthenticatedLayout>
     );
 }

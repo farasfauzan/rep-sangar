@@ -10,6 +10,7 @@ use App\Models\PurchaseOrder;
 use App\Models\Spk;
 use App\Models\User;
 use App\Models\Role;
+use App\Models\InvoiceAttachment;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Tests\TestCase;
@@ -41,12 +42,28 @@ class ErpWorkflowTest extends TestCase
 
         $this->assertDatabaseHas('rab_budgets', ['id' => $rab->id, 'status' => 'APPROVED']);
 
+        $projectPo = $this->actingAs($user)->postJson('/api/pos', [
+            'project_id' => $project->id,
+            'po_number' => 'PO-ERP-PROJECT-001',
+            'date' => '2026-07-10',
+            'po_level' => 'PROJECT',
+            'items' => [[
+                'rab_budget_id' => $rab->id,
+                'item_name' => $rab->description,
+                'qty' => 2,
+            ]],
+        ])->assertCreated();
+        $projectPoId = $projectPo->json('data.id');
+        $this->actingAs($user)->putJson("/api/pos/{$projectPoId}/route", ['routed_to' => 'PURCHASE_ORDER'])->assertOk();
+
         $poResponse = $this->actingAs($user)->postJson('/api/pos', [
             'project_id' => $project->id,
             'po_number' => 'PO-ERP-001',
             'date' => '2026-07-10',
             'po_level' => 'SUPPLIER',
+            'parent_po_id' => $projectPoId,
             'supplier_name' => 'PT Material Utama',
+            'jadwal_kirim' => '2026-07-15',
             'payment_terms' => '30 hari',
             'items' => [[
                 'rab_budget_id' => $rab->id,
@@ -80,13 +97,17 @@ class ErpWorkflowTest extends TestCase
             ->assertJsonPath('message', 'Invoice harus lolos verifikasi engineer sebelum diverifikasi keuangan.');
 
         $this->putJson("/api/invoices/{$invoiceId}/engineer-verify")->assertOk();
+        foreach (['INVOICE', 'PO', 'SURAT_JALAN'] as $docType) {
+            InvoiceAttachment::create(['invoice_id' => $invoiceId, 'doc_type' => $docType, 'file_path' => "{$docType}.pdf", 'file_name' => "{$docType}.pdf"]);
+        }
         $this->putJson("/api/invoices/{$invoiceId}/finance-verify")->assertOk();
         $this->putJson("/api/invoices/{$invoiceId}/manager-approve")->assertOk();
+        $this->putJson("/api/invoices/{$invoiceId}/cashflow-approve", ['cashflow_status' => 'APPROVED'])->assertOk();
 
         $this->postJson("/api/invoices/{$invoiceId}/payments", [
             'payment_method' => 'TRANSFER',
             'amount' => 1,
-        ])->assertUnprocessable();
+        ])->assertOk();
 
         $this->postJson("/api/invoices/{$invoiceId}/payments", [
             'payment_method' => 'TRANSFER',
@@ -95,7 +116,8 @@ class ErpWorkflowTest extends TestCase
 
         $this->assertDatabaseHas('purchase_orders', ['id' => $poId, 'status' => 'RECEIVED']);
         $this->assertDatabaseHas('invoices', ['id' => $invoiceId, 'status' => 'PAID']);
-        $this->assertDatabaseHas('transactions', ['invoice_id' => $invoiceId, 'amount' => 111000]);
+        $this->assertDatabaseHas('transactions', ['invoice_id' => $invoiceId, 'amount' => 1]);
+        $this->assertDatabaseHas('transactions', ['invoice_id' => $invoiceId, 'amount' => 110999]);
     }
 
     public function test_spk_invoice_must_reference_an_approved_opname_once(): void
@@ -104,8 +126,23 @@ class ErpWorkflowTest extends TestCase
         $this->actingAs($user);
         $project = $this->project();
 
+        $sourcePoResponse = $this->actingAs($user)->postJson('/api/pos', [
+            'project_id' => $project->id,
+            'po_number' => 'PO-ERP-SPK-001',
+            'date' => '2026-07-10',
+            'po_level' => 'PROJECT',
+            'items' => [[
+                'rab_budget_id' => $this->rab($project, 'APPROVED')->id,
+                'item_name' => 'Pekerjaan SPK',
+                'qty' => 1,
+            ]],
+        ])->assertCreated();
+        $sourcePoId = $sourcePoResponse->json('data.id');
+        $this->actingAs($user)->putJson("/api/pos/{$sourcePoId}/route", ['routed_to' => 'SPK'])->assertOk();
+
         $spkResponse = $this->actingAs($user)->postJson('/api/spks', [
             'project_id' => $project->id,
+            'source_po_id' => $sourcePoId,
             'spk_number' => 'SPK-ERP-001',
             'spk_type' => 'SUBKON',
             'subcon_name' => 'CV Bangun Jaya',
@@ -179,12 +216,21 @@ class ErpWorkflowTest extends TestCase
             ->assertUnprocessable()
             ->assertJsonPath('message', 'Hanya permohonan dana yang sudah disetujui yang dapat dibayar.');
 
+        $this->actingAs($user)->putJson("/api/fund-requests/{$fundId}/verify")->assertOk();
         $this->actingAs($user)->putJson("/api/fund-requests/{$fundId}/approve")->assertOk();
         $this->postJson("/api/fund-requests/{$fundId}/payments", ['payment_method' => 'TRANSFER'])->assertOk();
-        $this->putJson("/api/fund-requests/{$fundId}/lpj", ['lpj_notes' => 'Bukti belanja lengkap.'])->assertOk();
+        $this->post("/api/fund-requests/{$fundId}/attachments", [
+            'doc_type' => 'LPJ',
+            'file' => UploadedFile::fake()->create('lpj.pdf', 10, 'application/pdf'),
+        ])->assertCreated();
+        $this->putJson("/api/fund-requests/{$fundId}/lpj", [
+            'lpj_notes' => 'Bukti belanja lengkap.',
+            'lpj_items' => [['description' => 'Operasional lapangan', 'amount' => 75000]],
+        ])->assertOk();
         $this->actingAs($user)->putJson("/api/fund-requests/{$fundId}/lpj-verify")->assertOk();
+        $this->actingAs($user)->putJson("/api/fund-requests/{$fundId}/lpj-approve")->assertOk();
 
-        $this->assertDatabaseHas('fund_requests', ['id' => $fundId, 'status' => 'LPJ_VERIFIED']);
+        $this->assertDatabaseHas('fund_requests', ['id' => $fundId, 'status' => 'LPJ_APPROVED']);
         $this->assertDatabaseHas('transactions', ['fund_request_id' => $fundId, 'amount' => 75000]);
     }
 

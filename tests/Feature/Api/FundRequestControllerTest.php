@@ -39,11 +39,11 @@ class FundRequestControllerTest extends TestCase
         ])
             ->assertCreated()
             ->assertJsonPath('data.request_number', 'FR-TEST-001')
-            ->assertJsonPath('data.status', 'PENDING_APPROVAL');
+            ->assertJsonPath('data.status', 'PENDING_VERIFICATION');
 
         $this->assertDatabaseHas('fund_requests', [
             'request_number' => 'FR-TEST-001',
-            'status'         => 'PENDING_APPROVAL',
+            'status'         => 'PENDING_VERIFICATION',
         ]);
     }
 
@@ -72,9 +72,9 @@ class FundRequestControllerTest extends TestCase
 
     // ─── APPROVE ──────────────────────────────────────────────────────────
 
-    public function test_keu_kantor_can_approve_fund_request(): void
+    public function test_manager_can_approve_verified_fund_request(): void
     {
-        $this->actingAsRole('KEU_KANTOR');
+        $this->actingAsRole('MGR_KOMERSIAL');
         $fr = FundRequest::factory()->create(['status' => 'PENDING_APPROVAL']);
 
         $this->putJson("/api/fund-requests/{$fr->id}/approve")
@@ -86,7 +86,7 @@ class FundRequestControllerTest extends TestCase
 
     public function test_approve_rejects_non_pending_status(): void
     {
-        $this->actingAsRole('KEU_KANTOR');
+        $this->actingAsRole('MGR_KOMERSIAL');
         $fr = FundRequest::factory()->create(['status' => 'APPROVED']);
 
         $this->putJson("/api/fund-requests/{$fr->id}/approve")
@@ -106,20 +106,20 @@ class FundRequestControllerTest extends TestCase
 
     public function test_keu_kantor_can_reject_fund_request(): void
     {
-        $this->actingAsRole('KEU_KANTOR');
+        $this->actingAsRole('MGR_KOMERSIAL');
         $fr = FundRequest::factory()->create(['status' => 'PENDING_APPROVAL']);
 
-        $this->putJson("/api/fund-requests/{$fr->id}/reject")
+        $this->putJson("/api/fund-requests/{$fr->id}/reject-manager")
             ->assertOk()
             ->assertJsonPath('data.status', 'REJECTED');
     }
 
     public function test_reject_rejects_non_pending_status(): void
     {
-        $this->actingAsRole('KEU_KANTOR');
+        $this->actingAsRole('MGR_KOMERSIAL');
         $fr = FundRequest::factory()->create(['status' => 'REJECTED']);
 
-        $this->putJson("/api/fund-requests/{$fr->id}/reject")
+        $this->putJson("/api/fund-requests/{$fr->id}/reject-manager")
             ->assertUnprocessable();
     }
 

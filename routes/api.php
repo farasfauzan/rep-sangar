@@ -25,6 +25,7 @@ use App\Http\Controllers\Api\TaxController;
 use App\Http\Controllers\Api\EfakturController;
 use App\Http\Controllers\Api\FinancialReportController;
 use App\Http\Controllers\Api\RabImportController;
+use App\Http\Controllers\Api\BankStatementController;
 
 Route::middleware(['auth:web', 'verified'])->withoutMiddleware([\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class])->group(function () {
     Route::get('/user', function (Request $request) {
@@ -41,6 +42,7 @@ Route::middleware(['auth:web', 'verified'])->withoutMiddleware([\Illuminate\Foun
         Route::put('/projects/{id}', [ProjectController::class, 'update']);
         Route::patch('/projects/{id}', [ProjectController::class, 'update']);
         Route::delete('/projects/{id}', [ProjectController::class, 'destroy']);
+        Route::post('/projects/{id}/reset', [ProjectController::class, 'resetData']);
     });
 
     // ─── RAB Import ────────────────────────────────────────────────────
@@ -120,8 +122,10 @@ Route::middleware(['auth:web', 'verified'])->withoutMiddleware([\Illuminate\Foun
         Route::get('/invoices', [InvoiceController::class, 'index']);
         Route::get('/invoices/{id}', [InvoiceController::class, 'show']);
     });
-    Route::middleware('role:ADMIN,LAPANGAN,KEU_KANTOR,PURCHASING_LEGAL')->group(function () {
+    Route::middleware('role:ADMIN,PURCHASING_LEGAL')->group(function () {
         Route::post('/invoices', [InvoiceController::class, 'store']);
+        Route::post('/invoices/{id}/attachments', [InvoiceController::class, 'uploadAttachment']);
+        Route::delete('/invoice-attachments/{attachment}', [InvoiceController::class, 'deleteAttachment']);
     });
     Route::middleware('role:ADMIN,ENGINEER')->group(function () {
         Route::put('/invoices/{id}/engineer-verify', [InvoiceController::class, 'verifyEngineer']);
@@ -157,12 +161,23 @@ Route::middleware(['auth:web', 'verified'])->withoutMiddleware([\Illuminate\Foun
     Route::middleware('role:ADMIN,LAPANGAN,ENGINEER')->group(function () {
         Route::post('/fund-requests', [FundRequestController::class, 'store']);
     });
-    Route::middleware('role:ADMIN,KEU_KANTOR')->group(function () {
-        Route::put('/fund-requests/{id}/approve', [FundRequestController::class, 'approve']);
+    Route::middleware('role:ADMIN,VERIFIKATOR_KEU')->group(function () {
+        Route::put('/fund-requests/{id}/verify', [FundRequestController::class, 'verifyRequest']);
         Route::put('/fund-requests/{id}/reject', [FundRequestController::class, 'reject']);
-        Route::post('/fund-requests/{id}/payments', [FundRequestController::class, 'pay']);
-        Route::put('/fund-requests/{id}/lpj', [FundRequestController::class, 'submitLpj']);
         Route::put('/fund-requests/{id}/lpj-verify', [FundRequestController::class, 'verifyLpj']);
+    });
+    Route::middleware('role:ADMIN,MGR_KOMERSIAL')->group(function () {
+        Route::put('/fund-requests/{id}/approve', [FundRequestController::class, 'approve']);
+        Route::put('/fund-requests/{id}/reject-manager', [FundRequestController::class, 'reject']);
+        Route::put('/fund-requests/{id}/lpj-approve', [FundRequestController::class, 'approveLpj']);
+    });
+    Route::middleware('role:ADMIN,KEU_KANTOR')->group(function () {
+        Route::post('/fund-requests/{id}/payments', [FundRequestController::class, 'pay']);
+    });
+    Route::middleware('role:ADMIN,LAPANGAN')->group(function () {
+        Route::put('/fund-requests/{id}/lpj', [FundRequestController::class, 'submitLpj']);
+        Route::post('/fund-requests/{id}/attachments', [FundRequestController::class, 'uploadAttachment']);
+        Route::delete('/fund-request-attachments/{attachment}', [FundRequestController::class, 'deleteAttachment']);
     });
 
     // ─── Fund Receipts ────────────────────────────────────────────────
@@ -178,14 +193,17 @@ Route::middleware(['auth:web', 'verified'])->withoutMiddleware([\Illuminate\Foun
         Route::get('/goods-receipts', [GoodsReceiptController::class, 'index']);
         Route::get('/pos/{poId}/goods-receipts', [GoodsReceiptController::class, 'getByPo']);
     });
-    Route::middleware('role:ADMIN,LAPANGAN,PURCHASING_LEGAL,VERIFIKATOR_KEU,MGR_KOMERSIAL,KEU_KANTOR,PAJAK,ACCOUNTING')->group(function () {
+    Route::middleware('role:ADMIN,LAPANGAN,PURCHASING_LEGAL')->group(function () {
         Route::post('/goods-receipts', [GoodsReceiptController::class, 'store']);
     });
 
     // ─── Opnames ──────────────────────────────────────────────────────
-    Route::middleware('role:ADMIN,LAPANGAN,ENGINEER,PURCHASING_LEGAL,VERIFIKATOR_KEU,MGR_KOMERSIAL,KEU_KANTOR,PAJAK,ACCOUNTING')->group(function () {
+    Route::middleware('role:ADMIN,LAPANGAN')->group(function () {
         Route::get('/opnames', [OpnameController::class, 'index']);
         Route::post('/opnames', [OpnameController::class, 'store']);
+    });
+    Route::middleware('role:ENGINEER,PURCHASING_LEGAL,VERIFIKATOR_KEU,MGR_KOMERSIAL,KEU_KANTOR,PAJAK,ACCOUNTING')->group(function () {
+        Route::get('/opnames', [OpnameController::class, 'index']);
     });
     Route::middleware('role:ADMIN,ENGINEER')->group(function () {
         Route::put('/opnames/{id}/approve', [OpnameController::class, 'approve']);
@@ -240,6 +258,13 @@ Route::middleware(['auth:web', 'verified'])->withoutMiddleware([\Illuminate\Foun
         Route::post('/general-ledger', [GeneralLedgerController::class, 'store']);
     });
 
+    Route::middleware('role:ADMIN,ACCOUNTING')->group(function () {
+        Route::get('/bank-statements', [BankStatementController::class, 'index']);
+        Route::post('/bank-statements', [BankStatementController::class, 'store']);
+        Route::post('/bank-statements/upload', [BankStatementController::class, 'uploadCsv']);
+        Route::put('/bank-statements/{id}/match', [BankStatementController::class, 'match']);
+    });
+
     // ─── Chart of Accounts ────────────────────────────────────────────
     Route::middleware('role:ADMIN,ACCOUNTING')->group(function () {
         Route::get('/chart-of-accounts', [ChartOfAccountController::class, 'index']);
@@ -283,7 +308,12 @@ Route::middleware(['auth:web', 'verified'])->withoutMiddleware([\Illuminate\Foun
         Route::post('/efaktur/upload', [EfakturController::class, 'uploadCsv']);
         Route::put('/efaktur/{id}/validate', [EfakturController::class, 'validateRecord']);
         Route::put('/efaktur/{id}/status', [EfakturController::class, 'updateStatus']);
+        Route::put('/efaktur/{id}/taxable-confirmation', [EfakturController::class, 'confirmTaxable']);
+        Route::put('/efaktur/{id}/kpp-status', [EfakturController::class, 'submitKpp']);
         Route::delete('/efaktur/{id}', [EfakturController::class, 'destroy']);
+    });
+    Route::middleware('role:ADMIN,ACCOUNTING')->group(function () {
+        Route::put('/efaktur/{id}/accounting-post', [EfakturController::class, 'postToAccounting']);
     });
 
     // ─── Financial Reports ────────────────────────────────────────────

@@ -10,10 +10,12 @@ export default function CreatePO() {
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState('');
     const [selectedProject, setSelectedProject] = useState('');
+    const [sourcePos, setSourcePos] = useState([]);
     const api = useApi();
 
     const { data, setData, post, processing, errors, reset } = useForm({
         project_id: '',
+        parent_po_id: '',
         po_number: 'PO-' + Math.floor(Math.random() * 100000),
         po_level: 'PROJECT',
         date: new Date().toISOString().split('T')[0],
@@ -22,6 +24,7 @@ export default function CreatePO() {
         supplier_phone: '',
         supplier_contact_person: '',
         payment_terms: '',
+        jadwal_kirim: '',
         discount: 0,
         include_ppn: true,
         catatan: '',
@@ -32,15 +35,34 @@ export default function CreatePO() {
 
     useEffect(() => {
         if (selectedProject) {
-            api.get(`/api/projects/${selectedProject}`, {}, { silent: true }).then(res => {
-                setRabBudgets(res.data?.rab_budgets || res.rab_budgets || []);
-            }).catch(() => {});
+            Promise.all([
+                api.get(`/api/projects/${selectedProject}`, {}, { silent: true }),
+                api.get('/api/pos', { project_id: selectedProject, per_page: 100 }, { silent: true }),
+            ]).then(([projectRes, poRes]) => {
+                setRabBudgets(projectRes.data?.rab_budgets || projectRes.rab_budgets || []);
+                const pos = poRes.data || poRes || [];
+                setSourcePos(pos.filter((po) => po.po_level === 'PROJECT' && po.status === 'ROUTED' && po.routed_to === 'PURCHASE_ORDER' && !(po.child_purchase_orders || []).length));
+            }).catch(() => { setSourcePos([]); });
         }
     }, [selectedProject]);
 
     const handleProjectChange = (e) => {
         setSelectedProject(e.target.value);
         setData('project_id', e.target.value);
+        setData('parent_po_id', '');
+        setData('items', []);
+    };
+
+    const selectSourcePo = (poId) => {
+        setData('parent_po_id', poId);
+        const source = sourcePos.find((po) => String(po.id) === String(poId));
+        setData('items', (source?.items || []).map((item) => ({
+            rab_budget_id: item.rab_budget_id,
+            item_name: item.item_name,
+            qty: Number(item.qty),
+            unit_price: 0,
+            total_price: 0,
+        })));
     };
 
     const addItem = () => {
@@ -157,6 +179,7 @@ export default function CreatePO() {
                                             type="button"
                                             onClick={() => {
                                                 setData('po_level', 'PROJECT');
+                                                setData('parent_po_id', '');
                                                 setData('items', []);
                                             }}
                                             className={`flex-1 p-4 rounded-lg border-2 text-center transition-colors ${
@@ -172,6 +195,7 @@ export default function CreatePO() {
                                             type="button"
                                             onClick={() => {
                                                 setData('po_level', 'SUPPLIER');
+                                                setData('parent_po_id', '');
                                                 setData('items', []);
                                             }}
                                             className={`flex-1 p-4 rounded-lg border-2 text-center transition-colors ${
@@ -217,6 +241,14 @@ export default function CreatePO() {
                                     <div className="mb-6 p-4 bg-purple-50 rounded-lg border border-purple-200">
                                         <h4 className="text-sm font-bold text-purple-700 mb-3">Informasi Supplier</h4>
                                         <div className="grid grid-cols-2 gap-4">
+                                            <div className="col-span-2">
+                                                <label className="block text-sm font-medium text-gray-700">PO Proyek sumber *</label>
+                                                <select value={data.parent_po_id} onChange={(e) => selectSourcePo(e.target.value)} required className="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm">
+                                                    <option value="">-- Pilih PO yang sudah diarahkan Engineer --</option>
+                                                    {sourcePos.map((po) => <option key={po.id} value={po.id}>{po.po_number}</option>)}
+                                                </select>
+                                                {!sourcePos.length && <p className="mt-1 text-xs text-amber-700">Belum ada PO Proyek yang diarahkan Engineer ke PO Supplier.</p>}
+                                            </div>
                                             <div>
                                                 <label className="block text-sm font-medium text-gray-700">Nama Supplier *</label>
                                                 <input type="text" value={data.supplier_name} onChange={e => setData('supplier_name', e.target.value)} required={!isProjectLevel} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" />
@@ -236,6 +268,10 @@ export default function CreatePO() {
                                             <div>
                                                 <label className="block text-sm font-medium text-gray-700">Termin Pembayaran</label>
                                                 <input type="text" value={data.payment_terms} onChange={e => setData('payment_terms', e.target.value)} placeholder="Contoh: 30 hari" className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" />
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700">Jadwal Pengiriman *</label>
+                                                <input type="date" value={data.jadwal_kirim} onChange={e => setData('jadwal_kirim', e.target.value)} required className="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm" />
                                             </div>
                                         </div>
                                     </div>

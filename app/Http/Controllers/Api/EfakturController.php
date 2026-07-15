@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Efaktur;
+use App\Models\ChartOfAccount;
+use App\Models\GeneralLedger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -234,6 +236,69 @@ class EfakturController extends Controller
             'message' => "Status e-Faktur diubah ke {$newStatus}.",
             'data' => $efaktur->fresh(),
         ]);
+    }
+
+    public function confirmTaxable(Request $request, int $id): JsonResponse
+    {
+        $validated = $request->validate(['taxable_confirmation' => 'required|in:CONFIRMED,NOT_TAXABLE']);
+        $efaktur = Efaktur::findOrFail($id);
+        if ($efaktur->status !== 'validated') {
+            return response()->json(['success' => false, 'message' => 'E-Faktur harus divalidasi sebelum konfirmasi pajak.'], 422);
+        }
+        $efaktur->update(['taxable_confirmation' => $validated['taxable_confirmation']]);
+
+        return response()->json(['success' => true, 'message' => 'Konfirmasi barang kena pajak disimpan.', 'data' => $efaktur->fresh()]);
+    }
+
+    public function submitKpp(Request $request, int $id): JsonResponse
+    {
+        $validated = $request->validate([
+            'kpp_document_status' => 'required|in:COMPLETE,INCOMPLETE',
+            'ppn_treatment' => 'nullable|in:COMPENSATE,RESTITUTION',
+        ]);
+        $efaktur = Efaktur::findOrFail($id);
+        if ($efaktur->taxable_confirmation === 'PENDING') {
+            return response()->json(['success' => false, 'message' => 'Konfirmasi barang kena pajak belum diisi.'], 422);
+        }
+        $efaktur->update([
+            'kpp_document_status' => $validated['kpp_document_status'],
+            'ppn_treatment' => $validated['ppn_treatment'] ?? $efaktur->ppn_treatment,
+        ]);
+
+        return response()->json(['success' => true, 'message' => 'Status berkas KPP dan perlakuan PPN disimpan.', 'data' => $efaktur->fresh()]);
+    }
+
+    public function postToAccounting(Request $request, int $id): JsonResponse
+    {
+        $efaktur = Efaktur::findOrFail($id);
+        if ($efaktur->status !== 'approved' || $efaktur->kpp_document_status !== 'COMPLETE') {
+            return response()->json(['success' => false, 'message' => 'E-Faktur harus approved dan berkas KPP lengkap sebelum direkap Accounting.'], 422);
+        }
+        if ($efaktur->accounting_posted_at) {
+            return response()->json(['success' => false, 'message' => 'E-Faktur sudah direkap Accounting.'], 422);
+        }
+        $coaPpn = ChartOfAccount::where('code', '1400')->exists();
+        $coaPayable = ChartOfAccount::where('code', '2100')->exists();
+        if ($coaPpn && $coaPayable) {
+            $journal = 'JRN-' . now()->format('Ymd') . '-' . str_pad((string) (GeneralLedger::whereDate('transaction_date', now())->count() + 1), 4, '0', STR_PAD_LEFT);
+            foreach ([['1400', (float) $efaktur->ppn, 0], ['2100', 0, (float) $efaktur->ppn]] as [$account, $debit, $credit]) {
+                GeneralLedger::create([
+                    'journal_number' => $journal,
+                    'transaction_date' => $efaktur->faktur_date,
+                    'account_code' => $account,
+                    'description' => "Rekap e-Faktur {$efaktur->faktur_number}",
+                    'debit' => $debit,
+                    'credit' => $credit,
+                    'reference_type' => Efaktur::class,
+                    'reference_id' => $efaktur->id,
+                    'project_id' => $efaktur->project_id,
+                    'created_by' => $request->user()->id,
+                ]);
+            }
+        }
+        $efaktur->update(['accounting_posted_at' => now(), 'accounting_posted_by' => $request->user()->id]);
+
+        return response()->json(['success' => true, 'message' => 'E-Faktur direkap ke Accounting.', 'data' => $efaktur->fresh()]);
     }
 
     /**

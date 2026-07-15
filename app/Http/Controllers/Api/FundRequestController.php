@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\ApprovalLog;
 use App\Models\ChartOfAccount;
 use App\Models\FundRequest;
+use App\Models\FundRequestAttachment;
 use App\Models\GeneralLedger;
 use App\Models\Transaction;
 use App\Support\WorkflowState;
@@ -13,6 +14,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 class FundRequestController extends Controller
 {
@@ -20,7 +22,12 @@ class FundRequestController extends Controller
     {
         $perPage = min($request->query('per_page', 15), 100);
 
-        return response()->json(FundRequest::with(['project', 'transactions', 'fundReceipts'])->latest()->paginate($perPage));
+        return response()->json(FundRequest::with(['project', 'transactions', 'fundReceipts', 'attachments.uploader'])->latest()->paginate($perPage));
+    }
+
+    public function show($id)
+    {
+        return response()->json(FundRequest::with(['project', 'transactions', 'fundReceipts', 'attachments.uploader'])->findOrFail($id));
     }
 
     public function store(Request $request)
@@ -33,12 +40,30 @@ class FundRequestController extends Controller
         ]);
 
         $fundRequest = FundRequest::create($validated + [
-            'status' => 'PENDING_APPROVAL',
+            'status' => 'PENDING_VERIFICATION',
             'requested_by' => $request->user()->id,
         ]);
         $this->log($request, $fundRequest, 'SUBMIT');
 
-        return response()->json(['message' => 'Permohonan dana/LPJ dibuat.', 'data' => $fundRequest], 201);
+        return response()->json(['message' => 'Permohonan dana dikirim ke Verifikator Keuangan.', 'data' => $fundRequest], 201);
+    }
+
+    public function verifyRequest(Request $request, $id)
+    {
+        $fundRequest = DB::transaction(function () use ($request, $id) {
+            $fundRequest = FundRequest::query()->lockForUpdate()->findOrFail($id);
+            WorkflowState::require($fundRequest->status, ['PENDING_VERIFICATION'], 'Permohonan dana belum siap diverifikasi.');
+            $fundRequest->update([
+                'status' => 'PENDING_APPROVAL',
+                'verified_by' => $request->user()->id,
+                'verified_at' => now(),
+            ]);
+            $this->log($request, $fundRequest, 'FINANCE_VERIFY');
+
+            return $fundRequest;
+        });
+
+        return response()->json(['message' => 'Permohonan dana terverifikasi dan menunggu approval Manajer.', 'data' => $fundRequest]);
     }
 
     public function approve(Request $request, $id)
@@ -69,14 +94,15 @@ class FundRequestController extends Controller
 
     public function reject(Request $request, $id)
     {
+        $validated = $request->validate(['notes' => 'nullable|string|max:1000']);
         $result = DB::transaction(function () use ($request, $id) {
             $fundRequest = FundRequest::where('id', $id)->lockForUpdate()->firstOrFail();
 
-            if ($fundRequest->status !== 'PENDING_APPROVAL') {
-                return response()->json(['message' => 'Permohonan dana harus berstatus PENDING_APPROVAL sebelum ditolak.'], 422);
+            if (! in_array($fundRequest->status, ['PENDING_VERIFICATION', 'PENDING_APPROVAL'], true)) {
+                return response()->json(['message' => 'Permohonan dana sudah melewati tahap penolakan.'], 422);
             }
 
-            $fundRequest->update(['status' => 'REJECTED']);
+            $fundRequest->update(['status' => 'REJECTED', 'rejection_notes' => $request->input('notes')]);
             $this->log($request, $fundRequest, 'REJECT');
 
             return $fundRequest->fresh();
@@ -96,6 +122,7 @@ class FundRequestController extends Controller
             'amount' => 'nullable|numeric|min:0',
             'payment_date' => 'nullable|date',
             'proof_of_payment' => 'nullable|string',
+            'proof_file' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
         ]);
 
         $fundRequest = DB::transaction(function () use ($validated, $request, $id) {
@@ -117,12 +144,25 @@ class FundRequestController extends Controller
 
             $fundRequest->update(['status' => 'PAID', 'paid_at' => now()]);
 
+            $proof = $validated['proof_of_payment'] ?? null;
+            if ($request->hasFile('proof_file')) {
+                $file = $request->file('proof_file');
+                $proof = $file->store("attachments/fund-request/{$fundRequest->id}", 'public');
+                FundRequestAttachment::create([
+                    'fund_request_id' => $fundRequest->id,
+                    'doc_type' => 'BUKTI_TRANSFER',
+                    'file_path' => $proof,
+                    'file_name' => $file->getClientOriginalName(),
+                    'uploaded_by' => $request->user()->id,
+                ]);
+            }
+
             Transaction::create([
                 'fund_request_id' => $fundRequest->id,
                 'payment_method' => $validated['payment_method'],
                 'amount' => $validated['amount'] ?? $fundRequest->amount,
                 'payment_date' => $validated['payment_date'] ?? now()->toDateString(),
-                'proof_of_payment' => $validated['proof_of_payment'] ?? null,
+                'proof_of_payment' => $proof,
             ]);
             $this->log($request, $fundRequest, 'PAYMENT');
 
@@ -138,8 +178,8 @@ class FundRequestController extends Controller
     public function submitLpj(Request $request, $id)
     {
         $validated = $request->validate([
-            'lpj_notes' => 'nullable|string',
-            'lpj_items' => 'nullable|array',
+            'lpj_notes' => 'required|string',
+            'lpj_items' => 'required|array|min:1',
             'lpj_items.*.description' => 'required|string',
             'lpj_items.*.amount' => 'required|numeric|min:0',
             'lpj_items.*.category' => 'nullable|string',
@@ -150,6 +190,12 @@ class FundRequestController extends Controller
             ['PAID'],
             'LPJ hanya dapat dikirim setelah permohonan dana dibayar.'
         );
+        $lpjTotal = collect($validated['lpj_items'])->sum(fn ($item) => (float) $item['amount']);
+        WorkflowState::requireAmount($lpjTotal, $fundRequest->amount, 'Total rincian LPJ harus sama dengan dana yang diterima.');
+        if (! $fundRequest->attachments()->where('doc_type', 'LPJ')->exists()) {
+            WorkflowState::fail('Unggah minimal satu dokumen LPJ sebelum mengirim verifikasi.');
+        }
+
         $fundRequest->update([
             'status' => 'LPJ_SUBMITTED',
             'lpj_notes' => $validated['lpj_notes'] ?? null,
@@ -169,10 +215,58 @@ class FundRequestController extends Controller
             ['LPJ_SUBMITTED'],
             'LPJ harus berstatus LPJ_SUBMITTED sebelum diverifikasi.'
         );
-        $fundRequest->update(['status' => 'LPJ_VERIFIED']);
+        $fundRequest->update([
+            'status' => 'LPJ_PENDING_APPROVAL',
+            'lpj_verified_by' => $request->user()->id,
+            'lpj_verified_at' => now(),
+        ]);
         $this->log($request, $fundRequest, 'LPJ_VERIFY');
 
-        return response()->json(['message' => 'LPJ diverifikasi.', 'data' => $fundRequest]);
+        return response()->json(['message' => 'LPJ diverifikasi dan menunggu approval Manajer.', 'data' => $fundRequest]);
+    }
+
+    public function approveLpj(Request $request, $id)
+    {
+        $fundRequest = FundRequest::findOrFail($id);
+        WorkflowState::require($fundRequest->status, ['LPJ_PENDING_APPROVAL'], 'LPJ belum siap disetujui Manajer.');
+        $fundRequest->update([
+            'status' => 'LPJ_APPROVED',
+            'lpj_approved_by' => $request->user()->id,
+            'lpj_approved_at' => now(),
+        ]);
+        $this->log($request, $fundRequest, 'LPJ_APPROVE');
+
+        return response()->json(['message' => 'LPJ disetujui dan workflow permohonan dana selesai.', 'data' => $fundRequest]);
+    }
+
+    public function uploadAttachment(Request $request, $id)
+    {
+        $fundRequest = FundRequest::findOrFail($id);
+        $validated = $request->validate([
+            'doc_type' => 'required|in:LPJ,NOTA,BUKTI_TRANSFER,OTHER',
+            'file' => 'required|file|mimes:pdf,jpg,jpeg,png,xlsx,xls|max:10240',
+        ]);
+        $file = $request->file('file');
+        $path = $file->store("attachments/fund-request/{$fundRequest->id}", 'public');
+        $attachment = FundRequestAttachment::create([
+            'fund_request_id' => $fundRequest->id,
+            'doc_type' => $validated['doc_type'],
+            'file_path' => $path,
+            'file_name' => $file->getClientOriginalName(),
+            'uploaded_by' => $request->user()->id,
+        ]);
+
+        return response()->json(['message' => 'Dokumen LPJ diunggah.', 'data' => $attachment], 201);
+    }
+
+    public function deleteAttachment(FundRequestAttachment $attachment)
+    {
+        if (Storage::disk('public')->exists($attachment->file_path)) {
+            Storage::disk('public')->delete($attachment->file_path);
+        }
+        $attachment->delete();
+
+        return response()->json(['message' => 'Dokumen LPJ dihapus.']);
     }
 
     /**

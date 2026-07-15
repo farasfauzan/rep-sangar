@@ -126,7 +126,7 @@ class Phase3Test extends TestCase
     {
         $this->actingAsRole('VERIFIKATOR_KEU');
         $invoice = Invoice::factory()->create([
-            'status' => 'APPROVED',
+            'status' => 'PENDING_CASHFLOW',
             'cashflow_status' => 'PENDING',
         ]);
 
@@ -146,7 +146,7 @@ class Phase3Test extends TestCase
     {
         $this->actingAsRole('VERIFIKATOR_KEU');
         $invoice = Invoice::factory()->create([
-            'status' => 'APPROVED',
+            'status' => 'PENDING_CASHFLOW',
             'cashflow_status' => 'PENDING',
         ]);
 
@@ -161,7 +161,7 @@ class Phase3Test extends TestCase
     {
         $this->actingAsRole('VERIFIKATOR_KEU');
         $invoice = Invoice::factory()->create([
-            'status' => 'APPROVED',
+            'status' => 'PENDING_CASHFLOW',
             'cashflow_status' => 'APPROVED',
         ]);
 
@@ -175,7 +175,7 @@ class Phase3Test extends TestCase
     {
         $this->actingAsRole('VERIFIKATOR_KEU');
         $invoice = Invoice::factory()->create([
-            'status' => 'APPROVED',
+            'status' => 'PENDING_CASHFLOW',
             'cashflow_status' => 'PENDING',
         ]);
 

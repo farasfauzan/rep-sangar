@@ -12,7 +12,7 @@ export default function PaymentExecution() {
     const [invoices, setInvoices] = useState([]);
     const [funds, setFunds] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [payment, setPayment] = useState({ payment_method: 'TRANSFER', payment_date: today(), proof_of_payment: '' });
+    const [payment, setPayment] = useState({ payment_method: 'TRANSFER', payment_date: today(), amount: '', proof_of_payment: '' });
     const [confirmState, setConfirmState] = useState({ open: false, url: '', message: '' });
     const api = useApi();
     const toast = useToast();
@@ -39,7 +39,8 @@ export default function PaymentExecution() {
 
     const updatePayment = (field, value) => setPayment((current) => ({ ...current, [field]: value }));
 
-    const pay = (url, message) => {
+    const pay = (url, message, amount) => {
+        setPayment((current) => ({ ...current, amount: amount ?? '' }));
         setConfirmState({ open: true, url, message });
     };
 
@@ -49,14 +50,14 @@ export default function PaymentExecution() {
         try {
             await api.post(url, payment);
             toast.success('Pembayaran dan bukti bayar dicatat.');
-            setPayment((current) => ({ ...current, proof_of_payment: '' }));
+            setPayment((current) => ({ ...current, amount: '', proof_of_payment: '' }));
             await fetchData();
         } catch (err) {
             // toast shown by useApi
         }
     };
 
-    const payableInvoices = invoices.filter((invoice) => invoice.status === 'UNPAID');
+    const payableInvoices = invoices.filter((invoice) => ['UNPAID', 'PARTIAL'].includes(invoice.status));
     const payableFunds = funds.filter((fund) => fund.status === 'APPROVED');
 
     return (
@@ -83,6 +84,10 @@ export default function PaymentExecution() {
                                 No Bukti / Referensi
                                 <input value={payment.proof_of_payment} onChange={(e) => updatePayment('proof_of_payment', e.target.value)} className="mt-1 w-full rounded border-gray-300" placeholder="TRF-001 / BG-001" />
                             </label>
+                            <label className="text-sm font-medium text-gray-700">
+                                Nilai Bayar (boleh bertahap)
+                                <input type="number" min="0.01" step="0.01" value={payment.amount} onChange={(e) => updatePayment('amount', e.target.value)} className="mt-1 w-full rounded border-gray-300" placeholder="Kosongkan untuk pelunasan" />
+                            </label>
                         </div>
                     </div>
 
@@ -95,7 +100,7 @@ export default function PaymentExecution() {
                                         <Td>{invoice.invoiceable_type?.includes('PurchaseOrder') ? 'PO Material' : 'SPK Subkon'}</Td>
                                         <Td>{money(invoice.amount)}</Td>
                                         <Td>{invoice.status}</Td>
-                                        <Td><Button onClick={() => pay(`/api/invoices/${invoice.id}/payments`, 'Bayar invoice ini?')}>Bayar</Button></Td>
+                                        <Td><Button onClick={() => pay(`/api/invoices/${invoice.id}/payments`, 'Bayar invoice ini?', Number(invoice.amount) - Number(invoice.transactions?.reduce((sum, tx) => sum + Number(tx.amount || 0), 0))) }>Bayar</Button></Td>
                                     </tr>
                                 ))}
                             </PaymentTable>

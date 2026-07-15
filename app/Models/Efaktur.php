@@ -23,6 +23,11 @@ class Efaktur extends Model
         'ppn',
         'ppnbm',
         'status',
+        'taxable_confirmation',
+        'kpp_document_status',
+        'ppn_treatment',
+        'accounting_posted_at',
+        'accounting_posted_by',
         'validation_errors',
         'notes',
         'project_id',
@@ -34,6 +39,7 @@ class Efaktur extends Model
         'dpp' => 'decimal:2',
         'ppn' => 'decimal:2',
         'ppnbm' => 'decimal:2',
+        'accounting_posted_at' => 'datetime',
     ];
 
     public function project(): BelongsTo

@@ -4,7 +4,10 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\ApprovalLog;
+use App\Models\ChartOfAccount;
+use App\Models\GeneralLedger;
 use App\Models\Invoice;
+use App\Models\InvoiceAttachment;
 use App\Models\Opname;
 use App\Models\PurchaseOrder;
 use App\Models\Spk;
@@ -12,6 +15,7 @@ use App\Models\Transaction;
 use App\Support\WorkflowState;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
 class InvoiceController extends Controller
@@ -21,7 +25,7 @@ class InvoiceController extends Controller
         $perPage = min($request->query('per_page', 15), 100);
 
         return response()->json(
-            Invoice::with(['invoiceable', 'transactions'])->latest()->paginate($perPage)
+            Invoice::with(['invoiceable', 'opname', 'transactions', 'attachments.uploader'])->latest()->paginate($perPage)
         );
     }
 
@@ -131,6 +135,11 @@ class InvoiceController extends Controller
                 ['ENGINEER_VERIFIED'],
                 'Invoice harus lolos verifikasi engineer sebelum diverifikasi keuangan.'
             );
+
+            $missingDocuments = $this->missingDocuments($invoice);
+            if ($missingDocuments !== []) {
+                WorkflowState::fail('Dokumen tagihan belum lengkap: ' . implode(', ', $missingDocuments) . '.');
+            }
             $invoice->update(['status' => 'PENDING_APPROVAL']);
             $this->log($request, $invoice, 'FINANCE_VERIFY');
 
@@ -149,14 +158,17 @@ class InvoiceController extends Controller
                 ['PENDING_APPROVAL'],
                 'Invoice harus lolos verifikasi keuangan sebelum disetujui manajer.'
             );
-            $invoice->update(['status' => 'UNPAID']);
+            $invoice->update([
+                'status' => 'PENDING_CASHFLOW',
+                'cashflow_status' => 'PENDING',
+            ]);
             $this->log($request, $invoice, 'MANAGER_APPROVE');
 
             return $invoice;
         });
 
         return response()->json([
-            'message' => 'Invoice telah disetujui Manajer dan siap dibayar.',
+            'message' => 'Invoice disetujui Manajer dan menunggu finalisasi cashflow.',
             'data' => $invoice,
         ]);
     }
@@ -165,38 +177,51 @@ class InvoiceController extends Controller
     {
         $validated = $request->validate([
             'payment_method' => 'required|string',
-            'amount' => 'nullable|numeric|min:0',
+            'amount' => 'nullable|numeric|min:0.01',
             'payment_date' => 'nullable|date',
             'proof_of_payment' => 'nullable|string',
+            'proof_file' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
         ]);
 
         $invoice = DB::transaction(function () use ($validated, $request, $id) {
             $invoice = Invoice::query()->lockForUpdate()->findOrFail($id);
 
-            WorkflowState::require(
-                $invoice->status,
-                ['UNPAID'],
-                'Hanya invoice yang sudah disetujui manajer yang dapat dibayar.'
-            );
-            WorkflowState::requireAmount(
-                $validated['amount'] ?? $invoice->amount,
-                $invoice->amount,
-                'Nilai pembayaran harus sama dengan nilai invoice karena pembayaran parsial belum didukung.'
-            );
+            WorkflowState::require($invoice->status, ['UNPAID', 'PARTIAL'], 'Invoice belum siap dibayar.');
+            WorkflowState::require($invoice->cashflow_status, ['APPROVED'], 'Cashflow invoice belum disetujui.');
 
-            if ($invoice->transactions()->exists()) {
-                WorkflowState::fail('Invoice ini sudah memiliki transaksi pembayaran.');
+            $paid = (float) $invoice->transactions()->sum('amount');
+            $remaining = max(0, (float) $invoice->amount - $paid);
+            $paymentAmount = (float) ($validated['amount'] ?? $remaining);
+            if ($paymentAmount <= 0 || $paymentAmount > $remaining) {
+                WorkflowState::fail('Nilai pembayaran harus lebih dari nol dan tidak boleh melebihi sisa tagihan.');
             }
 
-            $invoice->update(['status' => 'PAID']);
+            $proof = $validated['proof_of_payment'] ?? null;
+            if ($request->hasFile('proof_file')) {
+                $file = $request->file('proof_file');
+                $proof = $file->store("attachments/invoice/{$invoice->id}/payment", 'public');
+                InvoiceAttachment::create([
+                    'invoice_id' => $invoice->id,
+                    'doc_type' => 'BUKTI_BAYAR',
+                    'file_path' => $proof,
+                    'file_name' => $file->getClientOriginalName(),
+                    'uploaded_by' => $request->user()->id,
+                ]);
+            }
 
-            Transaction::create([
+            $transaction = Transaction::create([
                 'invoice_id' => $invoice->id,
                 'payment_method' => $validated['payment_method'],
-                'amount' => $validated['amount'] ?? $invoice->amount,
+                'amount' => $paymentAmount,
                 'payment_date' => $validated['payment_date'] ?? now()->toDateString(),
-                'proof_of_payment' => $validated['proof_of_payment'] ?? null,
+                'proof_of_payment' => $proof,
             ]);
+
+            $invoice->update([
+                'status' => ($paid + $paymentAmount) >= (float) $invoice->amount ? 'PAID' : 'PARTIAL',
+            ]);
+
+            $this->postPaymentJournal($invoice, $transaction);
 
             $this->log($request, $invoice, 'PAYMENT');
 
@@ -215,24 +240,103 @@ class InvoiceController extends Controller
             'cashflow_status' => ['required', Rule::in(['APPROVED', 'REJECTED'])],
         ]);
 
-        $invoice = Invoice::findOrFail($id);
-        if ($invoice->cashflow_status !== 'PENDING') {
-            return response()->json(['message' => 'Invoice sudah diproses cashflow.'], 422);
-        }
+        $invoice = DB::transaction(function () use ($request, $id, $validated) {
+            $invoice = Invoice::query()->lockForUpdate()->findOrFail($id);
+            WorkflowState::require($invoice->cashflow_status, ['PENDING'], 'Invoice sudah diproses cashflow.');
+            WorkflowState::require($invoice->status, ['PENDING_CASHFLOW'], 'Invoice belum siap untuk approval cashflow.');
 
-        WorkflowState::require(
-            $invoice->status,
-            ['PENDING_CASHFLOW', 'APPROVED'],
-            'Invoice belum siap untuk approval cashflow.'
-        );
+            $approved = $validated['cashflow_status'] === 'APPROVED';
+            $invoice->update([
+                'cashflow_status' => $validated['cashflow_status'],
+                'status' => $approved ? 'UNPAID' : 'CASHFLOW_REJECTED',
+            ]);
+            $this->log($request, $invoice, 'CASHFLOW_' . $validated['cashflow_status']);
 
-        $invoice->update(['cashflow_status' => $validated['cashflow_status']]);
-        $this->log($request, $invoice, 'CASHFLOW_' . $validated['cashflow_status']);
+            return $invoice;
+        });
 
         return response()->json([
             'message' => 'Status cashflow invoice diperbarui.',
             'data' => $invoice,
         ]);
+    }
+
+    public function uploadAttachment(Request $request, $id)
+    {
+        $invoice = Invoice::findOrFail($id);
+        $validated = $request->validate([
+            'doc_type' => 'required|in:INVOICE,PO,SPK,SURAT_JALAN,OPNAME,BAST,FAKTUR_PAJAK,OTHER',
+            'file' => 'required|file|mimes:pdf,jpg,jpeg,png,xlsx,xls|max:10240',
+        ]);
+        $file = $request->file('file');
+        $path = $file->store("attachments/invoice/{$invoice->id}", 'public');
+        $attachment = InvoiceAttachment::create([
+            'invoice_id' => $invoice->id,
+            'doc_type' => $validated['doc_type'],
+            'file_path' => $path,
+            'file_name' => $file->getClientOriginalName(),
+            'uploaded_by' => $request->user()->id,
+        ]);
+
+        return response()->json(['message' => 'Dokumen tagihan diunggah.', 'data' => $attachment], 201);
+    }
+
+    public function deleteAttachment(InvoiceAttachment $attachment)
+    {
+        if ($attachment->file_path && Storage::disk('public')->exists($attachment->file_path)) {
+            Storage::disk('public')->delete($attachment->file_path);
+        }
+        $attachment->delete();
+
+        return response()->json(['message' => 'Dokumen tagihan dihapus.']);
+    }
+
+    private function missingDocuments(Invoice $invoice): array
+    {
+        $required = $invoice->invoiceable_type === PurchaseOrder::class
+            ? ['INVOICE', 'PO', 'SURAT_JALAN']
+            : ['INVOICE', 'SPK', 'OPNAME', 'BAST'];
+        $available = $invoice->attachments()->pluck('doc_type')->all();
+
+        return array_values(array_diff($required, $available));
+    }
+
+    private function postPaymentJournal(Invoice $invoice, Transaction $transaction): void
+    {
+        if (GeneralLedger::where('reference_type', Transaction::class)->where('reference_id', $transaction->id)->exists()) {
+            return;
+        }
+        if (! ChartOfAccount::where('code', '5200')->exists() || ! ChartOfAccount::where('code', '1100')->exists()) {
+            return;
+        }
+
+        $date = $transaction->payment_date;
+        $journalNumber = $this->generateJournalNumber($date);
+        $description = "Pembayaran invoice {$invoice->invoice_number}";
+        $projectId = $invoice->invoiceable?->project_id;
+        foreach ([['5200', $transaction->amount, 0], ['1100', 0, $transaction->amount]] as [$account, $debit, $credit]) {
+            GeneralLedger::create([
+                'journal_number' => $journalNumber,
+                'transaction_date' => $date,
+                'account_code' => $account,
+                'description' => $description,
+                'debit' => $debit,
+                'credit' => $credit,
+                'reference_type' => Transaction::class,
+                'reference_id' => $transaction->id,
+                'project_id' => $projectId,
+                'created_by' => auth()->id(),
+            ]);
+        }
+    }
+
+    private function generateJournalNumber(string $date): string
+    {
+        $prefix = 'JRN-' . date('Ymd', strtotime($date)) . '-';
+        $last = GeneralLedger::where('journal_number', 'like', $prefix . '%')->orderByDesc('journal_number')->value('journal_number');
+        $sequence = $last ? (int) substr($last, strlen($prefix)) + 1 : 1;
+
+        return $prefix . str_pad($sequence, 4, '0', STR_PAD_LEFT);
     }
 
     private function log(Request $request, Invoice $invoice, string $action): void

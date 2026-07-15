@@ -16,7 +16,7 @@ Route::get('/', function () {
 
 Route::get('/dashboard', function () {
     return Inertia::render('Dashboard');
-})->middleware(['auth', 'verified'])->name('dashboard');
+})->middleware(['auth', 'verified', 'role:ADMIN,LAPANGAN,ENGINEER,PURCHASING_LEGAL,VERIFIKATOR_KEU,MGR_KOMERSIAL,KEU_KANTOR,PAJAK,ACCOUNTING'])->name('dashboard');
 
 Route::middleware('auth')->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
@@ -28,39 +28,39 @@ require __DIR__.'/auth.php';
 
 Route::get('/po', function () {
     return Inertia::render('PurchaseOrder');
-})->middleware(['auth', 'verified'])->name('po');
+})->middleware(['auth', 'verified', 'role:ADMIN,LAPANGAN,ENGINEER,PURCHASING_LEGAL,VERIFIKATOR_KEU,MGR_KOMERSIAL'])->name('po');
 
 Route::get('/po/create', function () {
     return Inertia::render('CreatePO');
-})->middleware(['auth', 'verified'])->name('po.create');
+})->middleware(['auth', 'verified', 'role:ADMIN,LAPANGAN,PURCHASING_LEGAL'])->name('po.create');
 
 Route::get('/goods-receipts', function () {
     return Inertia::render('GoodsReceipt');
-})->middleware(['auth', 'verified'])->name('goods-receipts');
+})->middleware(['auth', 'verified', 'role:ADMIN,LAPANGAN,PURCHASING_LEGAL'])->name('goods-receipts');
 
 Route::get('/opname', function () {
     return Inertia::render('OpnamePage');
-})->middleware(['auth', 'verified'])->name('opname');
+})->middleware(['auth', 'verified', 'role:ADMIN,LAPANGAN,ENGINEER'])->name('opname');
 
 Route::get('/invoicing', function () {
     return Inertia::render('InvoiceAdmin');
-})->middleware(['auth', 'verified'])->name('invoicing');
+})->middleware(['auth', 'verified', 'role:ADMIN,PURCHASING_LEGAL'])->name('invoicing');
 
 Route::get('/approval', function () {
     return Inertia::render('ApprovalDashboard');
-})->middleware(['auth', 'verified'])->name('approval');
+})->middleware(['auth', 'verified', 'role:ADMIN,ENGINEER,VERIFIKATOR_KEU,MGR_KOMERSIAL'])->name('approval');
 
 Route::get('/payment', function () {
     return Inertia::render('PaymentExecution');
-})->middleware(['auth', 'verified'])->name('payment');
+})->middleware(['auth', 'verified', 'role:ADMIN,KEU_KANTOR'])->name('payment');
 
 Route::get('/fund-requests', function () {
     return Inertia::render('FundRequestPage');
-})->middleware(['auth', 'verified'])->name('fund-requests');
+})->middleware(['auth', 'verified', 'role:ADMIN,LAPANGAN,VERIFIKATOR_KEU,MGR_KOMERSIAL,KEU_KANTOR'])->name('fund-requests');
 
 Route::get('/spk', function () {
     return Inertia::render('Spk');
-})->middleware(['auth', 'verified'])->name('spk');
+})->middleware(['auth', 'verified', 'role:ADMIN,PURCHASING_LEGAL,MGR_KOMERSIAL,ENGINEER'])->name('spk');
 
 Route::get('/rab-control', function () {
     return Inertia::render('RabControl');
@@ -79,7 +79,7 @@ Route::get('/rab-storage/{job}/download', [\App\Http\Controllers\RabStorageContr
     ->name('rab-storage.download');
 
 // RAB routes (web auth, not API token)
-Route::middleware(['auth', 'verified'])->group(function () {
+Route::middleware(['auth', 'verified', 'role:ADMIN,PURCHASING_LEGAL'])->group(function () {
     Route::post('/rab/preview', [\App\Http\Controllers\Api\RabBudgetController::class, 'preview']);
     Route::post('/rab/import', [\App\Http\Controllers\Api\RabBudgetController::class, 'autoImport']);
     Route::post('/rab/auto-import', [\App\Http\Controllers\Api\RabBudgetController::class, 'autoImport']);
@@ -94,18 +94,22 @@ Route::middleware(['auth', 'verified'])->group(function () {
 });
 
 // Supplier routes
-Route::middleware(['auth', 'verified'])->group(function () {
+Route::middleware(['auth', 'verified', 'role:ADMIN,PURCHASING_LEGAL'])->group(function () {
     Route::get('/suppliers', fn () => Inertia::render('SupplierList'))->name('suppliers');
     Route::get('/suppliers/create', fn () => Inertia::render('SupplierForm'))->name('suppliers.create');
     Route::get('/suppliers/{id}/edit', fn ($id) => Inertia::render('SupplierForm', ['id' => $id]))->name('suppliers.edit');
 });
 
-Route::middleware(['auth', 'verified'])->group(function () {
+Route::middleware(['auth', 'verified', 'role:ADMIN,PAJAK'])->group(function () {
     Route::get('/faktur-pajak', fn () => Inertia::render('FakturPajak'))->name('faktur-pajak');
     Route::get('/e-faktur-csv', fn () => Inertia::render('EFakturCsv'))->name('e-faktur-csv');
+});
+
+Route::middleware(['auth', 'verified', 'role:ADMIN,ACCOUNTING'])->group(function () {
     Route::get('/posting-jurnal', fn () => Inertia::render('PostingJurnal'))->name('posting-jurnal');
     Route::get('/laporan-keuangan', fn () => Inertia::render('LaporanKeuangan'))->name('laporan-keuangan');
     Route::get('/audit-trail', fn () => Inertia::render('AuditTrail'))->name('audit-trail');
+    Route::get('/bank-statements', fn () => Inertia::render('BankStatements'))->name('bank-statements');
     Route::get('/admin/users', fn () => Inertia::render('UserManagement'))->name('admin.users');
 });
 

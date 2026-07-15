@@ -285,7 +285,8 @@ class PurchaseOrderControllerTest extends TestCase
     public function test_submit_transitions_from_draft_to_pending_approval(): void
     {
         $user = $this->actingAsRole('PURCHASING_LEGAL');
-        $po = PurchaseOrder::factory()->create(['status' => 'DRAFT', 'created_by' => $user->id]);
+        $parent = PurchaseOrder::factory()->create(['po_level' => 'PROJECT', 'status' => 'ROUTED', 'routed_to' => 'PURCHASE_ORDER']);
+        $po = PurchaseOrder::factory()->create(['status' => 'DRAFT', 'po_level' => 'SUPPLIER', 'parent_po_id' => $parent->id, 'created_by' => $user->id]);
 
         $this->putJson("/api/pos/{$po->id}/submit")
             ->assertOk()
@@ -295,7 +296,7 @@ class PurchaseOrderControllerTest extends TestCase
     public function test_approve_transitions_from_pending_approval(): void
     {
         $this->actingAsRole('MGR_KOMERSIAL');
-        $po = PurchaseOrder::factory()->create(['status' => 'PENDING_APPROVAL']);
+        $po = PurchaseOrder::factory()->create(['status' => 'PENDING_APPROVAL', 'po_level' => 'SUPPLIER']);
 
         $this->putJson("/api/pos/{$po->id}/approve")
             ->assertOk()
@@ -307,7 +308,7 @@ class PurchaseOrderControllerTest extends TestCase
     public function test_reject_transitions_from_pending_approval(): void
     {
         $this->actingAsRole('MGR_KOMERSIAL');
-        $po = PurchaseOrder::factory()->create(['status' => 'PENDING_APPROVAL']);
+        $po = PurchaseOrder::factory()->create(['status' => 'PENDING_APPROVAL', 'po_level' => 'SUPPLIER']);
 
         $this->putJson("/api/pos/{$po->id}/reject", ['notes' => 'Harga mahal'])
             ->assertOk()
@@ -326,7 +327,7 @@ class PurchaseOrderControllerTest extends TestCase
     public function test_lapangan_cannot_approve_po(): void
     {
         $this->actingAsRole('LAPANGAN');
-        $po = PurchaseOrder::factory()->create(['status' => 'PENDING_APPROVAL']);
+        $po = PurchaseOrder::factory()->create(['status' => 'PENDING_APPROVAL', 'po_level' => 'SUPPLIER']);
 
         $this->putJson("/api/pos/{$po->id}/approve")
             ->assertForbidden();

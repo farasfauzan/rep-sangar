@@ -10,6 +10,7 @@ export default function InvoiceAdmin() {
     const [loading, setLoading] = useState(true);
     const [showForm, setShowForm] = useState(false);
     const [message, setMessage] = useState('');
+    const [attachment, setAttachment] = useState({ invoiceId: '', docType: 'INVOICE', file: null });
     const api = useApi();
 
     const [form, setForm] = useState({
@@ -61,8 +62,26 @@ export default function InvoiceAdmin() {
         }
     };
 
-    const receivablePos = pos.filter((po) => po.status === 'RECEIVED' && !invoices.some((invoice) => invoice.invoiceable_type?.includes('PurchaseOrder') && invoice.invoiceable_id === po.id));
+    const receivablePos = pos.filter((po) => po.po_level === 'SUPPLIER' && po.status === 'RECEIVED' && !invoices.some((invoice) => invoice.invoiceable_type?.includes('PurchaseOrder') && invoice.invoiceable_id === po.id));
     const invoiceableOpnames = opnames.filter((opname) => opname.status === 'APPROVED' && opname.spk?.status === 'APPROVED' && !invoices.some((invoice) => invoice.opname_id === opname.id));
+
+    const uploadAttachment = async () => {
+        if (!attachment.invoiceId || !attachment.file) {
+            setMessage('Pilih invoice, jenis dokumen, dan file terlebih dahulu.');
+            return;
+        }
+        const body = new FormData();
+        body.append('doc_type', attachment.docType);
+        body.append('file', attachment.file);
+        try {
+            await api.post(`/api/invoices/${attachment.invoiceId}/attachments`, body);
+            setAttachment({ invoiceId: '', docType: 'INVOICE', file: null });
+            await loadData();
+            setMessage('Dokumen invoice berhasil diunggah.');
+        } catch (err) {
+            setMessage(err.response?.data?.message || 'Gagal mengunggah dokumen invoice.');
+        }
+    };
 
     return (
         <AuthenticatedLayout header={<h2 className="text-xl font-semibold leading-tight text-gray-800">Drafting Tagihan (Invoicing)</h2>}>
@@ -141,6 +160,30 @@ export default function InvoiceAdmin() {
                                     </button>
                                 </form>
                             )}
+                        </div>
+                    </div>
+
+                    <div className="overflow-hidden bg-white shadow-sm sm:rounded-lg">
+                        <div className="p-6">
+                            <h3 className="text-lg font-bold">Kelengkapan Dokumen Tagihan</h3>
+                            <p className="mt-1 text-sm text-gray-600">Upload dokumen sebelum Verifikator Keuangan memproses invoice.</p>
+                            <div className="mt-4 grid gap-3 md:grid-cols-4">
+                                <select value={attachment.invoiceId} onChange={(e) => setAttachment((current) => ({ ...current, invoiceId: e.target.value }))} className="rounded border-gray-300 text-sm">
+                                    <option value="">Pilih invoice</option>
+                                    {invoices.filter((inv) => !['PAID', 'CASHFLOW_REJECTED'].includes(inv.status)).map((inv) => <option key={inv.id} value={inv.id}>{inv.invoice_number}</option>)}
+                                </select>
+                                <select value={attachment.docType} onChange={(e) => setAttachment((current) => ({ ...current, docType: e.target.value }))} className="rounded border-gray-300 text-sm">
+                                    <option value="INVOICE">Invoice</option>
+                                    <option value="PO">PO</option>
+                                    <option value="SPK">SPK</option>
+                                    <option value="SURAT_JALAN">Surat Jalan</option>
+                                    <option value="OPNAME">Opname</option>
+                                    <option value="BAST">BAST</option>
+                                    <option value="FAKTUR_PAJAK">Faktur Pajak</option>
+                                </select>
+                                <input type="file" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls" onChange={(e) => setAttachment((current) => ({ ...current, file: e.target.files?.[0] || null }))} className="text-sm" />
+                                <button type="button" onClick={uploadAttachment} className="rounded bg-indigo-600 px-4 py-2 text-sm text-white">Upload Dokumen</button>
+                            </div>
                         </div>
                     </div>
 

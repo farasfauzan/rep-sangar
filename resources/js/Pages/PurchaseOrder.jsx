@@ -126,9 +126,11 @@ export default function PurchaseOrder() {
                                                                 >
                                                                     Edit
                                                                 </a>
-                                                                <button onClick={() => submitPo(po.id)} className="rounded bg-emerald-600 px-3 py-1 text-sm text-white shadow hover:bg-emerald-700">Submit</button>
+                                                                {po.po_level === 'SUPPLIER'
+                                                                    ? <button onClick={() => submitPo(po.id)} className="rounded bg-emerald-600 px-3 py-1 text-sm text-white shadow hover:bg-emerald-700">Kirim Approval</button>
+                                                                    : <span className="text-xs text-amber-700">Menunggu routing Engineer</span>}
                                                             </>
-                                                        ) : '-'}
+                                                        ) : po.status === 'ROUTED' ? <span className="text-xs text-emerald-700">Sudah diarahkan ke {po.routed_to === 'SPK' ? 'SPK' : 'PO Supplier'}</span> : '-'}
                                                     </td>
                                                 </tr>
                                             ))

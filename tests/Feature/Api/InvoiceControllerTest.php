@@ -3,6 +3,7 @@
 namespace Tests\Feature\Api;
 
 use App\Models\Invoice;
+use App\Models\InvoiceAttachment;
 use App\Models\PurchaseOrder;
 
 class InvoiceControllerTest extends TestCase
@@ -130,6 +131,9 @@ class InvoiceControllerTest extends TestCase
     {
         $this->actingAsRole('VERIFIKATOR_KEU');
         $invoice = Invoice::factory()->engineerVerified()->create();
+        foreach (['INVOICE', 'PO', 'SURAT_JALAN'] as $docType) {
+            InvoiceAttachment::create(['invoice_id' => $invoice->id, 'doc_type' => $docType, 'file_path' => "{$docType}.pdf", 'file_name' => "{$docType}.pdf"]);
+        }
 
         $this->putJson("/api/invoices/{$invoice->id}/finance-verify")
             ->assertOk()
@@ -154,7 +158,7 @@ class InvoiceControllerTest extends TestCase
 
         $this->putJson("/api/invoices/{$invoice->id}/manager-approve")
             ->assertOk()
-            ->assertJsonPath('data.status', 'UNPAID');
+            ->assertJsonPath('data.status', 'PENDING_CASHFLOW');
     }
 
     public function test_manager_approve_requires_pending_approval(): void
@@ -178,10 +182,14 @@ class InvoiceControllerTest extends TestCase
             'invoiceable_id'   => $po->id,
             'status'           => 'PENDING_ENGINEER',
         ]);
+        foreach (['INVOICE', 'PO', 'SURAT_JALAN'] as $docType) {
+            InvoiceAttachment::create(['invoice_id' => $invoice->id, 'doc_type' => $docType, 'file_path' => "{$docType}.pdf", 'file_name' => "{$docType}.pdf"]);
+        }
 
         $this->putJson("/api/invoices/{$invoice->id}/engineer-verify")->assertOk();
         $this->putJson("/api/invoices/{$invoice->id}/finance-verify")->assertOk();
         $this->putJson("/api/invoices/{$invoice->id}/manager-approve")->assertOk();
+        $this->putJson("/api/invoices/{$invoice->id}/cashflow-approve", ['cashflow_status' => 'APPROVED'])->assertOk();
 
         $this->postJson("/api/invoices/{$invoice->id}/payments", [
             'payment_method' => 'TRANSFER',

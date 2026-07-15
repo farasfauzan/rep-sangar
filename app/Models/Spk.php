@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 class Spk extends Model
 {
     use HasFactory;
-    protected $fillable = ['project_id', 'spk_number', 'spk_type', 'subcon_name', 'subtotal', 'tax_amount', 'total_amount', 'include_ppn', 'payment_terms', 'jadwal_kirim', 'status', 'created_by', 'approved_by'];
+    protected $fillable = ['project_id', 'source_po_id', 'spk_number', 'spk_type', 'subcon_name', 'subtotal', 'tax_amount', 'total_amount', 'include_ppn', 'payment_terms', 'jadwal_kirim', 'status', 'created_by', 'approved_by'];
 
     protected $casts = [
         'include_ppn' => 'boolean',
@@ -21,6 +21,11 @@ class Spk extends Model
     public function project()
     {
         return $this->belongsTo(Project::class);
+    }
+
+    public function sourcePo()
+    {
+        return $this->belongsTo(PurchaseOrder::class, 'source_po_id');
     }
 
     public function progress()

@@ -15,6 +15,7 @@ const initialForm = () => ({
     include_ppn: true,
     payment_terms: '',
     jadwal_kirim: '',
+    source_po_id: '',
 });
 const money = (value) => `Rp ${Number(value || 0).toLocaleString('id-ID')}`;
 
@@ -27,6 +28,7 @@ export default function Spk() {
     const [showForm, setShowForm] = useState(false);
     const [message, setMessage] = useState('');
     const [confirmState, setConfirmState] = useState({ open: false, spk: null });
+    const [pos, setPos] = useState([]);
     const api = useApi();
 
     const load = async () => {
@@ -48,6 +50,29 @@ export default function Spk() {
     }, []);
 
     const update = (field, value) => setForm((current) => ({ ...current, [field]: value }));
+
+    const fetchPos = async (projectId) => {
+        if (!projectId) { setPos([]); return; }
+        try {
+            const res = await api.get('/api/pos', { params: { project_id: projectId } }, { silent: true });
+            const list = res?.data ?? res ?? [];
+            setPos(list.filter((po) => po.po_level === 'PROJECT' && po.status === 'ROUTED' && po.routed_to === 'SPK' && !(po.child_spks || []).length));
+        } catch { setPos([]); }
+    };
+
+    const handleProjectChange = (projectId) => {
+        update('project_id', projectId);
+        fetchPos(projectId);
+        update('subtotal', '');
+    };
+
+    const handlePoSelect = (poId) => {
+        update('source_po_id', poId);
+        const po = pos.find(p => String(p.id) === String(poId));
+        if (po) {
+            if (po.subcon_name && !form.subcon_name) update('subcon_name', po.subcon_name || '');
+        }
+    };
 
     const createSpk = async (event) => {
         event.preventDefault();
@@ -102,7 +127,7 @@ export default function Spk() {
                         {showForm && (
                             <form onSubmit={createSpk} className="mt-6 grid gap-4 border-t pt-6 md:grid-cols-2">
                                 <Field label="Proyek">
-                                    <select value={form.project_id} onChange={(event) => update('project_id', event.target.value)} required className="mt-1 block w-full rounded border-gray-300">
+                                    <select value={form.project_id} onChange={(event) => handleProjectChange(event.target.value)} required className="mt-1 block w-full rounded border-gray-300">
                                         <option value="">Pilih proyek</option>
                                         {projects.map((project) => <option key={project.id} value={project.id}>{project.project_name}</option>)}
                                     </select>
@@ -115,7 +140,16 @@ export default function Spk() {
                                     </select>
                                 </Field>
                                 <Field label="Nama Subkon"><input value={form.subcon_name} onChange={(event) => update('subcon_name', event.target.value)} required className="mt-1 block w-full rounded border-gray-300" placeholder="Nama perusahaan / mandor" /></Field>
-                                <Field label="Nilai sebelum PPN"><input type="number" min="0" step="0.01" value={form.subtotal} onChange={(event) => update('subtotal', event.target.value)} required className="mt-1 block w-full rounded border-gray-300" /></Field>
+                                <Field label="PO Proyek sumber">
+                                    <select value={form.source_po_id || ''} onChange={(event) => handlePoSelect(event.target.value)} required className="mt-1 block w-full rounded border-gray-300">
+                                        <option value="">Pilih PO yang diarahkan Engineer ke SPK</option>
+                                        {pos.map((po) => (
+                                            <option key={po.id} value={po.id}>{po.po_number} — {money(po.total_amount)}</option>
+                                        ))}
+                                    </select>
+                                    {!pos.length && <span className="mt-1 block text-xs text-amber-700">Belum ada PO Proyek yang diarahkan ke SPK.</span>}
+                                </Field>
+                                <Field label="Nilai sebelum PPN"><input type="number" min="0" step="0.01" value={form.subtotal} onChange={(event) => update('subtotal', event.target.value)} required className="mt-1 block w-full rounded border-gray-300" placeholder="Otomatis dari PO atau input manual" /></Field>
                                 <Field label="Termin Pembayaran"><input value={form.payment_terms} onChange={(event) => update('payment_terms', event.target.value)} className="mt-1 block w-full rounded border-gray-300" placeholder="Contoh: termin berdasarkan opname" /></Field>
                                 <Field label="Jadwal Kirim"><input type="date" value={form.jadwal_kirim} onChange={(event) => update('jadwal_kirim', event.target.value)} className="mt-1 block w-full rounded border-gray-300" /></Field>
                                 <label className="flex items-center gap-2 text-sm font-medium text-gray-700">

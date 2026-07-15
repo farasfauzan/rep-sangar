@@ -1,5 +1,5 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
-import { Head } from '@inertiajs/react';
+import { Head, usePage } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
 import { useApi } from '@/hooks/useApi';
 import { useProjects } from '@/hooks/useProjects';
@@ -11,6 +11,8 @@ const money = (value) => `Rp ${Number(value || 0).toLocaleString('id-ID')}`;
 const docType = (invoice) => invoice.invoiceable_type?.includes('PurchaseOrder') ? 'PO Material' : 'SPK Subkon';
 
 export default function ApprovalDashboard() {
+    const roleName = usePage().props.auth?.user?.role?.role_name || '';
+    const can = (...roles) => roleName === 'ADMIN' || roles.includes(roleName);
     const [data, setData] = useState({ pos: [], spks: [], opnames: [], invoices: [], funds: [] });
     const [rabPending, setRabPending] = useState([]);
     const [rabProjectId, setRabProjectId] = useState('');
@@ -132,22 +134,23 @@ export default function ApprovalDashboard() {
         });
     };
 
-    const reject = async (type, id) => {
+    const reject = async (type, id, endpoint = 'reject') => {
         setPromptState({
             open: true,
             defaultValue: 'Dokumen belum sesuai.',
             callback: async (notes) => {
                 setPromptState({ open: false, defaultValue: '', callback: null });
-                await run('put', `/api/${type}/${id}/reject`, 'Tolak dokumen ini?', { notes });
+                await run('put', `/api/${type}/${id}/${endpoint}`, 'Tolak dokumen ini?', { notes });
             }
         });
     };
 
-    const pendingPos = data.pos.filter((po) => po.status === 'PENDING_APPROVAL');
+    const projectPosForRouting = data.pos.filter((po) => po.po_level === 'PROJECT' && po.status === 'DRAFT');
+    const pendingPos = data.pos.filter((po) => po.po_level === 'SUPPLIER' && po.status === 'PENDING_APPROVAL');
     const pendingSpks = data.spks.filter((spk) => spk.status === 'PENDING_APPROVAL');
     const pendingOpnames = data.opnames.filter((opname) => opname.status === 'PENDING');
-    const pendingInvoices = data.invoices.filter((invoice) => ['PENDING_ENGINEER', 'ENGINEER_VERIFIED', 'PENDING_APPROVAL'].includes(invoice.status));
-    const pendingFunds = data.funds.filter((fund) => ['PENDING_APPROVAL', 'LPJ_SUBMITTED'].includes(fund.status));
+    const pendingInvoices = data.invoices.filter((invoice) => ['PENDING_ENGINEER', 'ENGINEER_VERIFIED', 'PENDING_APPROVAL', 'PENDING_CASHFLOW'].includes(invoice.status));
+    const pendingFunds = data.funds.filter((fund) => ['PENDING_VERIFICATION', 'PENDING_APPROVAL', 'LPJ_SUBMITTED', 'LPJ_PENDING_APPROVAL'].includes(fund.status));
 
     return (
         <AuthenticatedLayout header={<h2 className="text-xl font-semibold leading-tight text-gray-800">Approval & Verifikasi</h2>}>
@@ -219,7 +222,25 @@ export default function ApprovalDashboard() {
                                 </div>
                             </div>
 
-                            <Section title="Approval PO" empty="Tidak ada PO menunggu approval.">
+                            <Section title="Routing PO Proyek oleh Engineer" empty="Tidak ada PO Proyek yang menunggu routing.">
+                                {projectPosForRouting.map((po) => (
+                                    <tr key={po.id}>
+                                        <Td strong>{po.po_number}</Td>
+                                        <Td>{po.project?.project_name ?? 'N/A'}</Td>
+                                        <Td>PO Proyek</Td>
+                                        <Td>{po.items?.length || 0} item</Td>
+                                        <Td>{po.status}</Td>
+                                        <Td>
+                                            {can('ENGINEER') ? <>
+                                                <Button onClick={() => run('put', `/api/pos/${po.id}/route`, 'Teruskan PO ini ke PO Supplier?', { routed_to: 'PURCHASE_ORDER' })}>Ke PO Supplier</Button>
+                                                <Button onClick={() => run('put', `/api/pos/${po.id}/route`, 'Teruskan PO ini ke SPK?', { routed_to: 'SPK' })}>Ke SPK</Button>
+                                            </> : <span className="text-xs text-gray-500">Menunggu Engineer</span>}
+                                        </Td>
+                                    </tr>
+                                ))}
+                            </Section>
+
+                            <Section title="Approval PO Supplier" empty="Tidak ada PO menunggu approval.">
                                 {pendingPos.map((po) => (
                                     <tr key={po.id}>
                                         <Td strong>{po.po_number}</Td>
@@ -282,8 +303,14 @@ export default function ApprovalDashboard() {
                                             {invoice.status === 'ENGINEER_VERIFIED' && (
                                                 <Button onClick={() => run('put', `/api/invoices/${invoice.id}/finance-verify`, 'Verifikasi finance invoice ini?')}>Finance OK</Button>
                                             )}
-                                            {invoice.status === 'PENDING_APPROVAL' && (
+                                            {invoice.status === 'PENDING_APPROVAL' && can('MGR_KOMERSIAL') && (
                                                 <Button onClick={() => run('put', `/api/invoices/${invoice.id}/manager-approve`, 'Setujui invoice ini?')}>Setujui</Button>
+                                            )}
+                                            {invoice.status === 'PENDING_CASHFLOW' && can('VERIFIKATOR_KEU') && (
+                                                <>
+                                                    <Button onClick={() => run('put', `/api/invoices/${invoice.id}/cashflow-approve`, 'Setujui cashflow invoice ini?', { cashflow_status: 'APPROVED' })}>Setujui Cashflow</Button>
+                                                    <Button danger onClick={() => run('put', `/api/invoices/${invoice.id}/cashflow-approve`, 'Tolak cashflow invoice ini?', { cashflow_status: 'REJECTED' })}>Tolak Cashflow</Button>
+                                                </>
                                             )}
                                         </Td>
                                     </tr>
@@ -299,14 +326,20 @@ export default function ApprovalDashboard() {
                                         <Td strong>{money(fund.amount)}</Td>
                                         <Td>{fund.status}</Td>
                                         <Td>
-                                            {fund.status === 'PENDING_APPROVAL' && (
+                                            {fund.status === 'PENDING_VERIFICATION' && can('VERIFIKATOR_KEU') && (
+                                                <Button onClick={() => run('put', `/api/fund-requests/${fund.id}/verify`, 'Verifikasi permohonan dana ini?')}>Verifikasi</Button>
+                                            )}
+                                            {fund.status === 'PENDING_APPROVAL' && can('MGR_KOMERSIAL') && (
                                                 <>
                                                     <Button onClick={() => run('put', `/api/fund-requests/${fund.id}/approve`, 'Setujui permohonan dana ini?')}>Setujui</Button>
-                                                    <Button danger onClick={() => reject('fund-requests', fund.id)}>Tolak</Button>
+                                                    <Button danger onClick={() => reject('fund-requests', fund.id, 'reject-manager')}>Tolak</Button>
                                                 </>
                                             )}
-                                            {fund.status === 'LPJ_SUBMITTED' && (
+                                            {fund.status === 'LPJ_SUBMITTED' && can('VERIFIKATOR_KEU') && (
                                                 <Button onClick={() => run('put', `/api/fund-requests/${fund.id}/lpj-verify`, 'Verifikasi LPJ ini?')}>Verifikasi LPJ</Button>
+                                            )}
+                                            {fund.status === 'LPJ_PENDING_APPROVAL' && can('MGR_KOMERSIAL') && (
+                                                <Button onClick={() => run('put', `/api/fund-requests/${fund.id}/lpj-approve`, 'Setujui LPJ ini?')}>Setujui LPJ</Button>
                                             )}
                                         </Td>
                                     </tr>

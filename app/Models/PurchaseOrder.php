@@ -11,6 +11,7 @@ class PurchaseOrder extends Model
 
     protected $fillable = [
         'project_id',
+        'parent_po_id',
         'po_number',
         'date',
         'supplier_name',
@@ -30,6 +31,7 @@ class PurchaseOrder extends Model
         'tax_amount',
         'total_amount',
         'payment_terms',
+        'jadwal_kirim',
         'status',
         'po_level',
         'routed_to',
@@ -37,16 +39,34 @@ class PurchaseOrder extends Model
         'routed_at',
         'created_by',
         'approved_by',
+        'contact_person',
+        'supplier_address',
     ];
 
     protected $casts = [
         'include_ppn' => 'boolean',
         'discount' => 'decimal:2',
+        'jadwal_kirim' => 'date',
     ];
 
     public function project()
     {
         return $this->belongsTo(Project::class);
+    }
+
+    public function parentPo()
+    {
+        return $this->belongsTo(self::class, 'parent_po_id');
+    }
+
+    public function childPurchaseOrders()
+    {
+        return $this->hasMany(self::class, 'parent_po_id');
+    }
+
+    public function childSpks()
+    {
+        return $this->hasMany(Spk::class, 'source_po_id');
     }
 
     public function items()

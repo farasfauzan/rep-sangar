@@ -20,7 +20,11 @@ class PurchaseOrderController extends Controller
         $perPage = min($request->query('per_page', 15), 100);
         $search = $request->query('search');
 
-        $query = PurchaseOrder::with(['project', 'items.rabBudget'])->latest();
+        $query = PurchaseOrder::with(['project', 'parentPo', 'childPurchaseOrders', 'childSpks', 'items.rabBudget'])->latest();
+
+        if ($projectId = $request->query('project_id')) {
+            $query->where('project_id', $projectId);
+        }
 
         if ($search) {
             $query->where(function ($q) use ($search) {
@@ -46,6 +50,7 @@ class PurchaseOrderController extends Controller
         // Base validation (both levels)
         $rules = [
             'project_id' => 'required|exists:projects,id',
+            'parent_po_id' => 'nullable|integer|exists:purchase_orders,id',
             'po_number' => 'required|string|unique:purchase_orders,po_number',
             'date' => 'required|date',
             'po_level' => 'nullable|string|in:PROJECT,SUPPLIER',
@@ -71,6 +76,7 @@ class PurchaseOrderController extends Controller
             $rules['faktur_pajak_npwp'] = 'nullable|string';
             $rules['faktur_pajak_alamat'] = 'nullable|string';
             $rules['payment_terms'] = 'nullable|string';
+            $rules['jadwal_kirim'] = 'nullable|date';
             $rules['items.*.unit_price'] = 'required|numeric|min:0';
         } else {
             // Project PO: lapangan input, no pricing
@@ -79,6 +85,30 @@ class PurchaseOrderController extends Controller
         }
 
         $validated = $request->validate($rules);
+
+        if ($poLevel === 'SUPPLIER') {
+            if (! empty($validated['parent_po_id'])) {
+                $parent = PurchaseOrder::with('items')->findOrFail($validated['parent_po_id']);
+                if ($parent->po_level !== 'PROJECT' || $parent->routed_to !== 'PURCHASE_ORDER' || $parent->status !== 'ROUTED') {
+                return response()->json([
+                    'message' => 'PO Supplier harus berasal dari PO Proyek yang sudah diarahkan Engineer ke Purchase Order.',
+                ], 422);
+                }
+                if ((int) $parent->project_id !== (int) $validated['project_id']) {
+                return response()->json(['message' => 'PO induk harus berasal dari proyek yang sama.'], 422);
+                }
+
+                $parentQty = $parent->items->keyBy('rab_budget_id');
+                foreach ($validated['items'] as $item) {
+                    $source = $parentQty->get($item['rab_budget_id']);
+                    if (! $source || (float) $item['qty'] > (float) $source->qty) {
+                    return response()->json([
+                        'message' => 'Item dan jumlah PO Supplier tidak boleh melebihi PO Proyek sumber.',
+                    ], 422);
+                    }
+                }
+            }
+        }
 
         $budgetIds = collect($validated['items'])->pluck('rab_budget_id')->unique();
         $matchingBudgetCount = RabBudget::query()
@@ -108,6 +138,7 @@ class PurchaseOrderController extends Controller
             $po = DB::transaction(function () use ($validated, $request, $poLevel) {
                 $po = PurchaseOrder::create([
                     'project_id' => $validated['project_id'],
+                    'parent_po_id' => $validated['parent_po_id'] ?? null,
                     'po_number' => $validated['po_number'],
                     'date' => $validated['date'],
                     'supplier_name' => $validated['supplier_name'] ?? null,
@@ -124,6 +155,7 @@ class PurchaseOrderController extends Controller
                     'faktur_pajak_npwp' => $validated['faktur_pajak_npwp'] ?? '002.652.984.2-331.000',
                     'faktur_pajak_alamat' => $validated['faktur_pajak_alamat'] ?? 'Karangrejo Barat No. 9 RT 002 RW 002, Tinjomoyo, Banyumanik, Semarang',
                     'payment_terms' => $validated['payment_terms'] ?? null,
+                    'jadwal_kirim' => $validated['jadwal_kirim'] ?? null,
                     'status' => 'DRAFT',
                     'po_level' => $poLevel,
                     'created_by' => $request->user()->id,
@@ -172,7 +204,9 @@ class PurchaseOrderController extends Controller
 
     public function show($id)
     {
-        $po = PurchaseOrder::with(['items.rabBudget', 'project', 'attachments.uploader'])->findOrFail($id);
+        $po = PurchaseOrder::with([
+            'items.rabBudget', 'project', 'parentPo', 'childPurchaseOrders', 'childSpks', 'attachments.uploader',
+        ])->findOrFail($id);
         return response()->json($po);
     }
 
@@ -187,6 +221,7 @@ class PurchaseOrderController extends Controller
             'supplier_phone' => 'nullable|string',
             'supplier_contact_person' => 'nullable|string',
             'payment_terms' => 'nullable|string',
+            'jadwal_kirim' => 'nullable|date',
             'include_ppn' => 'nullable|boolean',
             'discount' => 'nullable|numeric|min:0',
             'catatan' => 'nullable|string',
@@ -237,6 +272,12 @@ class PurchaseOrderController extends Controller
                 ['DRAFT'],
                 'Hanya PO berstatus DRAFT yang dapat dikirim untuk approval.'
             );
+            if ($po->po_level === 'PROJECT') {
+                WorkflowState::fail('PO Proyek harus diverifikasi dan diarahkan Engineer, bukan dikirim langsung untuk approval.');
+            }
+            if (! $po->parent_po_id) {
+                WorkflowState::fail('PO Supplier harus memiliki PO Proyek sumber.');
+            }
             $po->update(['status' => 'PENDING_APPROVAL']);
             $this->log($request, $po, 'SUBMIT');
 
@@ -254,6 +295,11 @@ class PurchaseOrderController extends Controller
                 $po->status,
                 ['PENDING_APPROVAL'],
                 'PO harus berstatus PENDING_APPROVAL sebelum disetujui.'
+            );
+            WorkflowState::require(
+                $po->po_level,
+                ['SUPPLIER'],
+                'Hanya PO Supplier yang masuk approval Manajer Komersial.'
             );
             $po->update([
                 'status' => 'APPROVED',
@@ -345,10 +391,19 @@ class PurchaseOrderController extends Controller
                 ['DRAFT'],
                 'PO harus berstatus DRAFT sebelum di-route.'
             );
+            WorkflowState::require(
+                $po->po_level,
+                ['PROJECT'],
+                'Hanya PO Proyek yang dapat diarahkan Engineer.'
+            );
+            if ($po->childPurchaseOrders()->exists() || $po->childSpks()->exists()) {
+                WorkflowState::fail('PO Proyek sudah memiliki dokumen turunan dan tidak dapat diarahkan ulang.');
+            }
             $po->update([
                 'routed_to' => $validated['routed_to'],
                 'routed_by' => $request->user()->id,
                 'routed_at' => now(),
+                'status' => 'ROUTED',
             ]);
             $this->log($request, $po, 'ROUTE', "Routed to {$validated['routed_to']}");
 
