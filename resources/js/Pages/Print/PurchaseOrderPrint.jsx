@@ -77,16 +77,13 @@ export default function PurchaseOrderPrint({ po }) {
 
                     {/* Company Header */}
                     <div className="flex items-start justify-between border-b-2 border-black pb-3 mb-4">
-                        <div className="flex items-start gap-4">
-                            <div className="flex-shrink-0 w-24 h-24">
-                                <img 
-                                    src="/images/logo-scs-print.svg" 
-                                    alt="PT. Sinar Cerah Sempurna" 
-                                    className="w-full h-full object-contain"
-                                />
-                            </div>
+                        <div className="flex flex-col gap-2">
+                            <img
+                                src="/images/logo-scs.png"
+                                alt="PT. Sinar Cerah Sempurna"
+                                className="h-auto w-72 max-w-full"
+                            />
                             <div>
-                                <h1 className="text-lg font-bold text-black tracking-wide">PT. SINAR CERAH SEMPURNA</h1>
                                 <p className="text-xs text-gray-700">Karangrejo Barat No. 9 RT 002 RW 002</p>
                                 <p className="text-xs text-gray-700">Tinjomoyo, Banyumanik, Semarang</p>
                                 <p className="text-xs text-gray-700">NPWP: 002.652.984.2-331.000</p>

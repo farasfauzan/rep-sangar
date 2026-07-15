@@ -30,14 +30,13 @@
 <body>
     <div class="container">
         <div class="header">
-            <div style="display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px;">
-                <img 
-                    src="/images/logo-scs-print.svg" 
-                    alt="PT. Sinar Cerah Sempurna" 
-                    style="width: 80px; height: 80px; object-fit: contain;"
+            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; margin-bottom: 8px;">
+                <img
+                    src="/images/logo-scs.png"
+                    alt="PT. Sinar Cerah Sempurna"
+                    style="width: 280px; height: auto; max-width: 100%;"
                 />
                 <div style="text-align: left;">
-                    <h1 style="font-size: 16px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #1e3a5f;">PT. SINAR CERAH SEMPURNA</h1>
                     <p style="font-size: 10px; color: #4a90d9; margin: 2px 0;">Karangrejo Barat No. 9 RT 002 RW 002</p>
                     <p style="font-size: 10px; color: #4a90d9;">Tinjomoyo, Banyumanik, Semarang</p>
                     <p style="font-size: 10px; color: #4a90d9;">NPWP: 002.652.984.2-331.000</p>

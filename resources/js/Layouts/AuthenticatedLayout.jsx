@@ -161,7 +161,7 @@ export default function Authenticated({ header, children }) {
     };
 
     return (
-        <div className="min-h-screen bg-gray-100 flex">
+        <div className="h-screen overflow-hidden bg-gray-100 flex">
             {/* Mobile overlay backdrop */}
             {sidebarOpen && (
                 <div
@@ -173,15 +173,15 @@ export default function Authenticated({ header, children }) {
             {/* Sidebar */}
             <aside
                 className={
-                    'fixed inset-y-0 left-0 z-40 w-64 bg-gray-900 text-white flex flex-col transition-transform duration-300 ease-in-out ' +
-                    'lg:static lg:translate-x-0 ' +
+                    'fixed inset-y-0 left-0 z-40 h-screen w-64 bg-gray-900 text-white flex flex-col transition-transform duration-300 ease-in-out ' +
+                    'lg:static lg:flex-shrink-0 lg:translate-x-0 ' +
                     (sidebarOpen ? 'translate-x-0' : '-translate-x-full')
                 }
             >
                 {/* Sidebar header with logo */}
                 <div className="h-16 flex items-center justify-between border-b border-gray-800 px-4">
                     <Link href="/" className="flex items-center">
-                        <ApplicationLogo className="block h-9 w-auto fill-current text-gray-200" />
+                        <ApplicationLogo className="block h-auto w-[215px] max-w-full" />
                     </Link>
                     {/* Close button on mobile */}
                     <button

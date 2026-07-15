@@ -60,16 +60,13 @@ export default function InvoicePrint({ invoice }) {
                 <div className="max-w-[210mm] mx-auto bg-white p-8 print:p-4 print:shadow-none shadow-lg">
                     {/* Company Header */}
                     <div className="flex items-start justify-between border-b-2 border-gray-800 pb-4 mb-6">
-                        <div className="flex items-center gap-4">
-                            <div className="flex-shrink-0 w-16 h-16">
-                                <img 
-                                    src="/images/logo-scs-print.svg" 
-                                    alt="PT. Sinar Cerah Sempurna" 
-                                    className="w-full h-full object-contain"
-                                />
-                            </div>
+                        <div className="flex flex-col gap-2">
+                            <img
+                                src="/images/logo-scs.png"
+                                alt="PT. Sinar Cerah Sempurna"
+                                className="h-auto w-72 max-w-full"
+                            />
                             <div>
-                                <h1 className="text-xl font-bold text-gray-900">PT. SINAR CERAH SEMPURNA</h1>
                                 <p className="text-sm text-gray-600">Karangrejo Barat No. 9 RT 002 RW 002</p>
                                 <p className="text-sm text-gray-600">Tinjomoyo, Banyumanik, Semarang</p>
                                 <p className="text-sm text-gray-600">NPWP: 002.652.984.2-331.000</p>
