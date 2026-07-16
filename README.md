@@ -1,176 +1,351 @@
-# ERP Konstruksi — Construction Management System
+# ERP Konstruksi PT. Sinar Cerah Sempurna
 
-A comprehensive Enterprise Resource Planning (ERP) system built specifically for the construction industry. Manage your entire project lifecycle from budgeting (RAB) through procurement, execution, invoicing, and accounting — all in one platform.
+ERP Konstruksi adalah aplikasi internal untuk mengelola siklus proyek konstruksi dari impor RAB, pengadaan, pekerjaan subkon, penerimaan barang, tagihan, pembayaran, pajak, sampai pencatatan akuntansi.
 
-## Features
+Dokumentasi ini menjelaskan alur yang diimplementasikan pada aplikasi saat ini. Alur bisnisnya diselaraskan dengan DAD operasional proyek: Lapangan/Proyek, Purchasing dan Legal, Engineer, Verifikator Keuangan, Manajer Komersial, Keuangan Kantor, Pajak, dan Accounting.
 
-| Module | Description |
-|--------|-------------|
-| **RAB (Rencana Anggaran Biaya)** | Project cost estimation and budget planning |
-| **Purchase Order (PO)** | Vendor procurement with approval workflows |
-| **SPK (Surat Perintah Kerja)** | Work orders and task assignment to subcontractors |
-| **Goods Receipt (GR)** | Material receiving, quality checks, and inventory updates |
-| **Invoice** | Vendor invoice matching against PO and GR (3-way match) |
-| **Payment** | Payment processing and cash-flow tracking |
-| **Inventory** | Warehouse management, stock tracking, material movements |
-| **General Ledger (GL)** | Double-entry accounting with journal posting |
-| **Tax (PPN/PPH)** | Indonesian tax management — PPN (VAT) and PPH withholding |
-| **Project Management** | Project tracking, milestones, and cost-vs-budget analysis |
-| **Reports** | Financial statements, project P&L, tax reports, aging |
-| **User & Role Management** | 9 predefined roles with granular permissions |
+## Daftar Isi
 
-## Tech Stack
+- [Fungsi Utama](#fungsi-utama)
+- [Peran Pengguna](#peran-pengguna)
+- [Alur Kerja](#alur-kerja)
+- [Notifikasi Workflow](#notifikasi-workflow)
+- [Panduan Operasional Singkat](#panduan-operasional-singkat)
+- [Instalasi Lokal](#instalasi-lokal)
+- [Pengujian](#pengujian)
+- [API Utama](#api-utama)
+- [Struktur Proyek](#struktur-proyek)
 
-- **Backend:** Laravel 11, PHP 8.3+
-- **Frontend:** React 18 via Inertia.js, Tailwind CSS 3
-- **Database:** SQLite (development) / MySQL 8.0 (production)
-- **Build:** Vite 5
-- **Testing:** PHPUnit / Pest
+## Fungsi Utama
 
-## Prerequisites
+| Area | Fungsi |
+| --- | --- |
+| Proyek dan RAB | Membuat proyek, mengimpor RAB Excel/CSV, memvalidasi item, dan melihat ringkasan anggaran. |
+| Purchase Order | Membuat PO Proyek tanpa harga, routing oleh Engineer, membuat PO Supplier, memilih master supplier, approval, cetak, dan lampiran. |
+| SPK | Membuat SPK Subkon atau Mandor dari PO Proyek yang sudah dirouting, approval, cetak, dan pelacakan pekerjaan. |
+| Penerimaan Barang | Mencatat barang datang berdasarkan PO Supplier dan memperbarui persediaan. |
+| Opname | Mencatat progres pekerjaan SPK untuk dasar tagihan pekerjaan. |
+| Invoice dan Pembayaran | Verifikasi bertahap, kelengkapan dokumen, approval cashflow, pembayaran parsial/penuh, dan bukti bayar. |
+| Permohonan Dana dan LPJ | Permohonan dana proyek, verifikasi, approval, pembayaran, unggah bukti LPJ, dan approval LPJ. |
+| Pajak dan Accounting | E-Faktur, PPN, KPP, buku besar, trial balance, laporan keuangan, serta rekening koran. |
+| Workflow | Notifikasi dalam aplikasi per role untuk dokumen yang membutuhkan tindak lanjut. |
 
-- PHP 8.3 or higher (with extensions: pdo, mbstring, openssl, tokenizer, xml, ctype, json, bcmath, fileinfo)
-- Composer 2.x
-- Node.js 18+ and npm 9+
-- MySQL 8.0 (for production) or SQLite (for development)
+## Peran Pengguna
 
-## Installation
+| Role | Tanggung jawab utama |
+| --- | --- |
+| ADMIN | Memantau seluruh modul, mengelola pengguna, dan menerima salinan notifikasi workflow. |
+| LAPANGAN | Membuat PO Proyek, menerima barang, input opname, mengajukan dana, dan mengirim LPJ. |
+| ENGINEER | Memverifikasi kebutuhan PO Proyek dan invoice; menentukan PO Proyek diteruskan ke PO Supplier atau SPK. |
+| PURCHASING_LEGAL | Mengelola supplier, membuat PO Supplier dan SPK, serta input tagihan. |
+| VERIFIKATOR_KEU | Memverifikasi dokumen invoice, permohonan dana, LPJ, dan approval cashflow. |
+| MGR_KOMERSIAL | Menyetujui PO Supplier, SPK, invoice, dan permohonan dana/LPJ sesuai tahapnya. |
+| KEU_KANTOR | Mengeksekusi pembayaran invoice dan permohonan dana. |
+| PAJAK | Mengelola faktur pajak, E-Faktur, PPN, KPP, kompensasi, atau restitusi. |
+| ACCOUNTING | Posting jurnal, melihat laporan keuangan, dan menangani rekening koran. |
 
-```bash
-# 1. Clone the repository
-git clone https://github.com/your-org/rep-sangar.git
+## Alur Kerja
+
+### Gambaran Umum
+
+~~~mermaid
+flowchart LR
+    A[RAB disetujui] --> B[PO Proyek]
+    B --> C[Verifikasi kebutuhan oleh Engineer]
+    C --> D{Arah dokumen}
+    D -->|Material| E[PO Supplier]
+    D -->|Pekerjaan| F[SPK Subkon atau Mandor]
+    E --> G[Approval Manajer]
+    F --> G
+    G --> H{Jenis dokumen}
+    H -->|PO Supplier| I[Penerimaan Barang]
+    H -->|SPK| J[Opname pekerjaan]
+    I --> K[Invoice]
+    J --> K
+    K --> L[Verifikasi dan approval]
+    L --> M[Pembayaran]
+    M --> N[Posting jurnal dan laporan]
+~~~
+
+### Pengadaan: PO Proyek, PO Supplier, dan SPK
+
+~~~mermaid
+flowchart LR
+    subgraph LP["Lapangan / Proyek"]
+        A[Input PO Proyek]
+    end
+
+    subgraph ENG["Engineer"]
+        B[Verifikasi Kebutuhan]
+        C{Sesuai kebutuhan?}
+        D{Pilih tujuan}
+    end
+
+    subgraph PUR["Purchasing dan Legal"]
+        E[Buat PO Supplier]
+        F[Buat SPK Subkon atau Mandor]
+    end
+
+    subgraph MGR["Manajer Komersial"]
+        G[Approval PO Supplier atau SPK]
+    end
+
+    A --> B --> C
+    C -->|Tidak| A
+    C -->|Ya| D
+    D -->|Material| E --> G
+    D -->|Pekerjaan| F --> G
+    G -->|Ditolak| E
+    G -->|Disetujui: PO| H[Penerimaan Barang]
+    G -->|Disetujui: SPK| I[Input Opname]
+~~~
+
+Aturan penting:
+
+- PO Proyek dibuat dari item RAB yang sudah disetujui dan tidak memuat harga supplier.
+- Engineer tidak meng-approve PO Proyek sebagai akhir proses. Engineer memilih tujuan: PO Supplier atau SPK.
+- PO Supplier wajib memiliki PO Proyek sumber yang telah diarahkan Engineer ke PURCHASE_ORDER.
+- SPK wajib memiliki PO Proyek sumber yang telah diarahkan Engineer ke SPK.
+- Pada PO Supplier, pengguna dapat memilih data dari Master Supplier. Nama, alamat, telepon, dan PIC diisi otomatis, kemudian masih dapat disesuaikan untuk dokumen tersebut.
+- PO Supplier dan SPK yang sudah dikirim hanya dapat disetujui atau ditolak pada tahap Manajer Komersial.
+
+### Material: Penerimaan Barang sampai Invoice
+
+~~~mermaid
+flowchart LR
+    A[PO Supplier disetujui] --> B[Logistik/Lapangan menerima barang]
+    B --> C[Cek barang dan surat jalan]
+    C --> D[Input Penerimaan Barang]
+    D --> E[Stok inventaris diperbarui]
+    E --> F[Input invoice material]
+    F --> G[Verifikasi Engineer]
+    G --> H[Verifikasi Keuangan]
+    H --> I[Approval Manajer]
+    I --> J[Approval Cashflow]
+    J --> K[Eksekusi pembayaran]
+~~~
+
+Invoice material hanya dapat dibuat untuk PO Supplier yang sudah memiliki penerimaan barang. Dokumen wajib untuk verifikasi finance adalah Invoice, PO, dan Surat Jalan.
+
+### Pekerjaan Subkon: SPK, Opname, dan Invoice
+
+~~~mermaid
+flowchart LR
+    A[SPK disetujui] --> B[Pelaksanaan pekerjaan]
+    B --> C[Input Opname]
+    C --> D[Approval Opname]
+    D --> E[Input invoice SPK]
+    E --> F[Verifikasi Engineer]
+    F --> G[Verifikasi Keuangan]
+    G --> H[Approval Manajer]
+    H --> I[Approval Cashflow]
+    I --> J[Pembayaran]
+~~~
+
+Invoice SPK hanya dapat dibuat dari SPK dan Opname yang telah disetujui. Dokumen wajib untuk verifikasi finance adalah Invoice, SPK, Opname, dan BAST.
+
+### Permohonan Dana dan LPJ
+
+~~~mermaid
+flowchart LR
+    A[Keuangan Proyek membuat permohonan dana] --> B[Verifikator Keuangan]
+    B --> C[Manajer Komersial]
+    C --> D[Keuangan Kantor]
+    D --> E[Dana dibayarkan]
+    E --> F[Keuangan Proyek mengirim LPJ dan lampiran]
+    F --> G[Verifikator Keuangan memeriksa LPJ]
+    G --> H[Manajer Komersial menyetujui LPJ]
+    H --> I[Workflow selesai]
+
+    B -->|Ditolak| A
+    C -->|Ditolak| A
+~~~
+
+Nilai rincian LPJ harus sama dengan nilai permohonan dana dan minimal satu dokumen LPJ harus diunggah sebelum LPJ dikirim.
+
+### Invoice, Cashflow, Pembayaran, Pajak, dan Accounting
+
+~~~mermaid
+flowchart LR
+    A[Invoice dibuat] --> B[Engineer memverifikasi kesesuaian]
+    B --> C[Verifikator Keuangan cek dokumen dan nilai]
+    C --> D[Manajer Komersial menyetujui]
+    D --> E[Verifikator Keuangan finalisasi cashflow]
+    E --> F[Keuangan Kantor membayar]
+    F --> G[Bukti bayar dan transaksi tersimpan]
+    G --> H[Posting jurnal otomatis]
+    H --> I[Rekening koran dan laporan keuangan]
+
+    J[Upload E-Faktur CSV] --> K[Validasi pajak]
+    K --> L[Konfirmasi BKP dan berkas KPP]
+    L --> M[Kompensasi atau restitusi PPN]
+    M --> N[Rekap Accounting]
+~~~
+
+Status pembayaran invoice mendukung UNPAID, PARTIAL, dan PAID. Bukti pembayaran dapat diunggah saat eksekusi pembayaran. Jika akun jurnal telah tersedia, pembayaran diposting ke buku besar.
+
+## Notifikasi Workflow
+
+Setiap perpindahan dokumen utama membuat notifikasi tersimpan di ikon lonceng pada header. Notifikasi dipolling secara berkala dan dapat ditandai sudah dibaca. Mengklik notifikasi akan membuka halaman kerja yang sesuai.
+
+| Kejadian | Tujuan notifikasi |
+| --- | --- |
+| PO Proyek dibuat | Engineer: Verifikasi Kebutuhan |
+| Engineer merouting PO ke PO Supplier atau SPK | Purchasing dan Legal |
+| PO Supplier atau SPK dikirim | Manajer Komersial |
+| PO Supplier atau SPK disetujui | Lapangan dan pembuat dokumen |
+| Invoice dibuat | Engineer: Verifikasi Tagihan |
+| Invoice lolos Engineer | Verifikator Keuangan |
+| Invoice lolos Finance | Manajer Komersial |
+| Cashflow invoice disetujui | Keuangan Kantor |
+| Permohonan dana atau LPJ dikirim | Role verifikator pada tahap berikutnya |
+
+ADMIN menerima salinan notifikasi agar dapat memantau seluruh handoff workflow.
+
+## Panduan Operasional Singkat
+
+### Membuat PO Supplier dari kebutuhan proyek
+
+1. Lapangan membuat PO Proyek pada menu Purchase Orders.
+2. Engineer membuka Verifikasi Kebutuhan dan memilih Ke PO Supplier.
+3. Purchasing dan Legal menerima notifikasi, membuka Purchase Orders, lalu membuat PO Supplier.
+4. Pada form PO Supplier, pilih PO Proyek sumber dan pilih supplier dari Master Supplier bila sudah terdaftar.
+5. Klik Kirim Approval pada daftar PO.
+6. Manajer Komersial melakukan approval.
+7. Saat material tiba, catat pada menu Penerimaan Barang.
+
+### Membuat SPK dari kebutuhan proyek
+
+1. Lapangan membuat PO Proyek.
+2. Engineer membuka Verifikasi Kebutuhan dan memilih Ke SPK.
+3. Purchasing dan Legal membuka Kontrak SPK dan membuat SPK dari PO Proyek sumber.
+4. Kirim SPK untuk approval Manajer Komersial.
+5. Setelah disetujui, Lapangan mencatat progres melalui Input Opname.
+
+### Memproses invoice
+
+1. Purchasing dan Legal menginput invoice beserta dokumen pendukung.
+2. Engineer membuka Verifikasi Tagihan untuk memastikan kesesuaian pekerjaan atau material.
+3. Verifikator Keuangan memeriksa kelengkapan dokumen dan nilai tagihan.
+4. Manajer Komersial memberi approval.
+5. Verifikator Keuangan menyetujui cashflow.
+6. Keuangan Kantor mencatat pembayaran dan bukti bayar.
+
+## Instalasi Lokal
+
+### Prasyarat
+
+- PHP 8.3 atau lebih baru
+- Composer 2
+- Node.js 18 atau lebih baru dan npm
+- SQLite untuk pengembangan lokal atau MySQL untuk lingkungan bersama/produksi
+
+### Menjalankan aplikasi
+
+~~~bash
+git clone https://github.com/farasfauzan/rep-sangar.git
 cd rep-sangar
 
-# 2. Install PHP dependencies
 composer install
-
-# 3. Install Node dependencies
 npm install
+~~~
 
-# 4. Create environment file
-cp .env.example .env
+Buat file .env dari .env.example, lalu atur koneksi database. Untuk Windows PowerShell:
 
-# 5. Generate application key
+~~~powershell
+Copy-Item .env.example .env
 php artisan key:generate
+php artisan migrate --seed
+npm run dev
+php artisan serve
+~~~
 
-# 6. Configure database in .env
-#    For SQLite (dev):  DB_CONNECTION=sqlite  (remove other DB_* lines)
-#    For MySQL (prod):  set DB_HOST, DB_PORT, DB_DATABASE, DB_USERNAME, DB_PASSWORD
+Aplikasi dapat diakses di http://127.0.0.1:8000.
 
-# 7. Run database migrations
-php artisan migrate
+Untuk menjalankan server, queue, log, dan Vite sekaligus:
 
-# 8. Seed default roles, permissions, and admin user
-php artisan db:seed
+~~~bash
+composer run dev
+~~~
 
-# 9. Start development server
-npm run dev          # Vite dev server (hot reload)
-php artisan serve    # Laravel dev server at http://localhost:8000
-```
+### Akun seed lokal
 
-## Role System
+Seeder membuat satu akun untuk setiap role. Format email adalah nama role huruf kecil diikuti @erp.com; kata sandi awalnya adalah password.
 
-The application ships with 9 predefined roles:
+| Role | Email |
+| --- | --- |
+| ADMIN | admin@erp.com |
+| ENGINEER | engineer@erp.com |
+| PURCHASING_LEGAL | purchasing_legal@erp.com |
+| VERIFIKATOR_KEU | verifikator_keu@erp.com |
+| MGR_KOMERSIAL | mgr_komersial@erp.com |
+| KEU_KANTOR | keu_kantor@erp.com |
 
-| # | Role | Description |
-|---|------|-------------|
-| 1 | **Super Admin** | Full system access, user and role management |
-| 2 | **Direksi** | Executive oversight — dashboards, reports, approvals |
-| 3 | **Project Manager** | Project planning, RAB creation, SPK management |
-| 4 | **Purchasing** | Purchase order creation, vendor management, GR processing |
-| 5 | **Finance** | Invoice verification, payment processing, GL posting |
-| 6 | **Accounting** | Journal entries, tax reporting, financial statements |
-| 7 | **Warehouse** | Inventory management, stock movements, material tracking |
-| 8 | **Supervisor** | Field supervision, SPK progress updates, quality checks |
-| 9 | **Staff** | Limited read/write access within assigned projects |
+Ganti kata sandi default sebelum aplikasi dipakai oleh pengguna selain pengembangan lokal.
 
-## Business Workflow
+## Pengujian
 
-```
-┌─────┐    ┌─────┐    ┌─────┐    ┌─────────┐    ┌─────────┐
-│ RAB │───▶│ PO  │───▶│ GR  │───▶│ Invoice │───▶│ Payment │
-└─────┘    └─────┘    └─────┘    └─────────┘    └─────────┘
-   │                      │            │
-   ▼                      ▼            ▼
-┌─────────┐         ┌──────────┐  ┌──────────┐
-│ Budget  │         │Inventory │  │    GL    │
-│ Control │         │ Update   │  │  Journal │
-└─────────┘         └──────────┘  └──────────┘
-```
-
-1. **RAB** — Estimate project costs per item/category
-2. **PO** — Raise purchase orders against approved RAB budgets
-3. **GR** — Receive materials, verify quantity/quality, update inventory
-4. **Invoice** — Match vendor invoices to PO and GR (3-way match)
-5. **Payment** — Process approved payments, post to General Ledger
-6. **GL** — Automatic journal entries for every financial transaction
-
-## API Documentation
-
-The application exposes a RESTful JSON API under `/api/v1/`. Authentication uses Laravel Sanctum tokens.
-
-Key endpoints:
-- `POST /api/v1/login` — Authenticate and receive token
-- `GET /api/v1/projects` — List projects
-- `GET /api/v1/rabs` — List RAB documents
-- `GET /api/v1/purchase-orders` — List POs
-- `POST /api/v1/goods-receipts` — Create goods receipt
-- `GET /api/v1/invoices` — List invoices
-
-Full API documentation is available at `/api/documentation` when running in local environment (Laravel Scribe).
-
-## Testing
-
-```bash
-# Run all tests
+~~~bash
+# Seluruh test backend
 php artisan test
 
-# Run with coverage
-php artisan test --coverage
+# Test workflow tertentu
+php artisan test tests/Feature/Api/PurchaseOrderControllerTest.php
+php artisan test tests/Feature/Api/WorkflowNotificationTest.php
 
-# Run specific test suite
-php artisan test --testsuite=Feature
-php artisan test --testsuite=Unit
-```
+# Build frontend untuk memastikan modul React terkompilasi
+npm run build
+~~~
 
-## Docker
+## API Utama
 
-```bash
-# Build and start containers
-docker compose up -d --build
+API menggunakan autentikasi sesi aplikasi dan berada di bawah prefix /api. Endpoint di bawah ini memerlukan pengguna yang sudah login serta role yang sesuai.
 
-# Run migrations inside the app container
-docker compose exec app php artisan migrate --seed
+| Area | Contoh endpoint |
+| --- | --- |
+| Proyek | GET /api/projects, POST /api/projects |
+| RAB | GET /api/rab, POST /api/rab/import/upload |
+| PO | GET /api/pos, POST /api/pos, PUT /api/pos/{id}/route |
+| SPK | GET /api/spks, POST /api/spks, PUT /api/spks/{id}/submit |
+| Penerimaan barang | GET /api/goods-receipts, POST /api/goods-receipts |
+| Opname | GET /api/opnames, POST /api/opnames |
+| Invoice | GET /api/invoices, POST /api/invoices, PUT /api/invoices/{id}/engineer-verify |
+| Dana dan LPJ | GET /api/fund-requests, POST /api/fund-requests, PUT /api/fund-requests/{id}/lpj |
+| Supplier | GET /api/suppliers, POST /api/suppliers |
+| Notifikasi | GET /api/notifications, PUT /api/notifications/{id}/read |
+| Accounting | GET /api/general-ledger, GET /api/bank-statements |
+| Pajak | GET /api/taxes, POST /api/efaktur/upload |
 
-# Access the application
-open http://localhost:8000
-```
+Lihat routes/api.php untuk daftar endpoint lengkap dan pembatasan role.
 
-## Contributing
+## Struktur Proyek
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/my-feature`)
-3. Write tests first (TDD encouraged)
-4. Commit your changes (`git commit -m 'feat: add my feature'`)
-5. Push to the branch (`git push origin feature/my-feature`)
-6. Open a Pull Request against `main`
+~~~text
+app/
+  Http/Controllers/Api/    Controller API per modul
+  Models/                  Model Eloquent
+  Notifications/           Notifikasi workflow tersimpan
+  Services/                Layanan workflow dan integrasi
+database/
+  migrations/              Skema database
+  seeders/                 Data awal, role, dan contoh proyek
+resources/js/
+  Pages/                   Halaman React/Inertia
+  Layouts/                 Layout aplikasi dan sidebar
+  Components/              Komponen UI termasuk notifikasi
+routes/
+  web.php                  Rute halaman Inertia
+  api.php                  Rute JSON API dan middleware role
+tests/Feature/Api/         Test feature dan workflow API
+~~~
 
-### Commit Convention
+## Catatan Pengoperasian
 
-We follow [Conventional Commits](https://www.conventionalcommits.org/):
-- `feat:` — New feature
-- `fix:` — Bug fix
-- `refactor:` — Code refactoring
-- `test:` — Adding or updating tests
-- `docs:` — Documentation changes
-- `chore:` — Maintenance tasks
+- Jalankan php artisan migrate setiap kali mengambil perubahan yang memiliki migration baru.
+- Jangan menggunakan php artisan migrate:fresh pada database yang berisi data operasional karena perintah tersebut menghapus seluruh tabel sebelum migrasi ulang.
+- File lampiran disimpan melalui disk public; pastikan php artisan storage:link telah dijalankan pada lingkungan yang membutuhkan akses file publik.
+- Permission menu membantu navigasi, tetapi API juga dibatasi oleh middleware role. Selalu gunakan akun sesuai peran prosesnya saat pengujian workflow.
 
-### Code Standards
+## Lisensi
 
-- PHP: PSR-12, enforced via Laravel Pint
-- JavaScript: ESLint with the project config
-- All PRs must pass CI (tests + build)
-
-## License
-
-Proprietary — All rights reserved.
+Proprietary. Seluruh hak cipta dilindungi.
