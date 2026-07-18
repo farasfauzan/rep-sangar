@@ -642,7 +642,7 @@ function ManualRabImport({ projectId, projects, onProjectChange, onAddProject, o
                 project_id: projectId,
                 file_id: fileInfo?.file_id,
                 replace_existing: replaceExisting,
-                rows: selected.map(({ id, selected: _selected, row_number, ...row }) => row),
+                rows: selected.map(({ id, selected: _selected, ...row }) => row),
             });
             setNotice({ type: 'success', text: response.data?.message || 'Import manual berhasil.' });
             setRows([]); setSheetRows({}); setRawSheetData({}); setSheetErrors({}); setSavingRows({}); setFileInfo(null); setFile(null); setSheet(''); setSelectedSheetOption('');

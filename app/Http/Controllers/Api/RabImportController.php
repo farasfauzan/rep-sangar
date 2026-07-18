@@ -197,6 +197,7 @@ class RabImportController extends Controller
         $validator = Validator::make($request->all(), [
             'project_id' => 'required|exists:projects,id',
             'rows' => 'required|array|min:1|max:10000',
+            'rows.*.row_number' => 'nullable|integer|min:1|max:1000000',
             'rows.*.code_item' => 'nullable|string|max:255',
             'rows.*.description' => 'required|string|max:1000',
             'rows.*.unit' => 'nullable|string|max:100',
@@ -229,7 +230,8 @@ class RabImportController extends Controller
                 $group = trim((string) ($row['group'] ?? ''));
 
                 return [
-                    'code_item' => trim((string) ($row['code_item'] ?? '')) ?: 'MANUAL-'.($index + 1),
+                    'code_item' => trim((string) ($row['code_item'] ?? ''))
+                        ?: $this->fallbackRabCode((string) $row['category'], (int) ($row['row_number'] ?? ($index + 1))),
                     'description' => trim((string) $row['description']),
                     'unit' => trim((string) ($row['unit'] ?? '')) ?: null,
                     'volume' => $volume,
@@ -353,7 +355,7 @@ class RabImportController extends Controller
         $payload = [
             'project_id' => $projectId,
             'code_item' => trim((string) $request->input('code_item', ''))
-                ?: 'XLS-'.strtoupper(substr($fingerprint, 0, 8)).'-'.strtoupper(Str::slug($sheet, '-')).'-'.$rowNumber,
+                ?: $this->fallbackRabCode($category, $rowNumber),
             'description' => trim((string) $request->description),
             'unit' => trim((string) $request->input('unit', '')) ?: null,
             'volume' => $volume,
@@ -446,6 +448,20 @@ class RabImportController extends Controller
             'message' => 'Item berhasil dimasukkan.',
             'data' => array_merge($this->manualImportItemData($result['item']), ['created' => $result['created']]),
         ]);
+    }
+
+    private function fallbackRabCode(string $category, int $sequence): string
+    {
+        $baseCategory = mb_strtolower(trim(explode(' / ', $category, 2)[0]));
+        $prefix = match ($baseCategory) {
+            'material' => 'MAT',
+            'subkon' => 'SUB',
+            'pekerja', 'upah' => 'PKJ',
+            'alat' => 'ALT',
+            default => 'ITM',
+        };
+
+        return sprintf('RAB-%s-%04d', $prefix, max(1, $sequence));
     }
 
     /**

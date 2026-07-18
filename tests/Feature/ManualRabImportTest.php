@@ -106,6 +106,32 @@ class ManualRabImportTest extends TestCase
         ])->assertUnprocessable()->assertJsonValidationErrors('rows.0.category');
     }
 
+    public function test_missing_excel_code_gets_readable_category_and_row_code(): void
+    {
+        $role = Role::create(['role_name' => 'ADMIN']);
+        $user = User::factory()->create(['role_id' => $role->id]);
+        $project = Project::factory()->create();
+
+        $this->actingAs($user)->postJson('/api/rab/import/manual', [
+            'project_id' => $project->id,
+            'rows' => [[
+                'row_number' => 23,
+                'code_item' => '',
+                'description' => 'Besi tulangan',
+                'unit' => 'kg',
+                'volume' => 10,
+                'unit_price' => 15000,
+                'total_price' => 150000,
+                'category' => 'Material',
+            ]],
+        ])->assertOk();
+
+        $this->assertDatabaseHas('rab_budgets', [
+            'project_id' => $project->id,
+            'code_item' => 'RAB-MAT-0023',
+        ]);
+    }
+
     public function test_one_item_can_be_saved_and_resaved_without_creating_duplicates(): void
     {
         $role = Role::create(['role_name' => 'ADMIN']);
@@ -144,6 +170,7 @@ class ManualRabImportTest extends TestCase
         $this->assertDatabaseCount('rab_budgets', 1);
         $this->assertDatabaseHas('rab_budgets', [
             'project_id' => $project->id,
+            'code_item' => 'RAB-MAT-0011',
             'category' => 'Material / Struktur',
             'source_row' => 11,
         ]);
