@@ -218,7 +218,7 @@ function ExcelSheetGrid({ rows, rawData, sheet, savingRows, updateRow, saveRow, 
                             return (
                                 <div key={rawRow.row_number} className={`absolute left-0 grid ${comfortableView ? 'text-[13px]' : 'text-[11px]'} ${rowVisualStyle} hover:bg-[#e8f0fe]`} style={{ top: `${(visibleStart + offset) * rowHeight}px`, height: `${rowHeight}px`, gridTemplateColumns, width: `${totalWidth}px` }}>
                                     <div className={`sticky left-0 z-20 flex items-center justify-center border-b border-r border-[#d5d5d5] px-1 text-center font-normal text-gray-500 ${isMajorSection ? 'bg-blue-100' : isSectionRow ? 'bg-amber-50' : isBlankDivider ? 'bg-slate-50' : 'bg-[#f8f9fa]'}`}>
-                                        {row ? <label className="flex items-center justify-center gap-1"><input type="checkbox" checked={row.selected} onChange={(event) => updateRow(row.id, 'selected', event.target.checked)} /><span>{rawRow.row_number}</span></label> : rawRow.row_number}
+                                        {row ? <label className="flex h-full w-full cursor-pointer items-center justify-center gap-1" title={row.selected ? 'Lepas pilihan baris' : 'Pilih baris'}><input type="checkbox" checked={row.selected} onChange={(event) => updateRow(row.id, 'selected', event.target.checked)} /><span>{rawRow.row_number}</span></label> : rawRow.row_number}
                                     </div>
                                     {visibleColumns.map((column, columnIndex) => {
                                         const rawValue = Array.isArray(rawRow.values) ? rawRow.values[columnIndex] : rawRow.values?.[column];
