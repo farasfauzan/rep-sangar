@@ -224,7 +224,7 @@ function ExcelSheetGrid({ rows, rawData, sheet, savingRows, updateRow, saveRow, 
                                         const rawValue = Array.isArray(rawRow.values) ? rawRow.values[columnIndex] : rawRow.values?.[column];
                                         const value = displayValue(rawValue);
                                         const address = `${column}${rawRow.row_number}`;
-                                        return <button key={column} type="button" title={value} onClick={() => setSelectedCell({ address, value })} className={`overflow-hidden text-ellipsis whitespace-nowrap border-b border-r border-[#d5d5d5] px-2 text-left ${isMajorSection && value ? 'font-bold tracking-wide' : isSectionRow && value ? 'font-semibold' : !row && value ? 'font-medium' : ''}`}>{value}</button>;
+                                        return <button key={column} type="button" title={row ? `${value || 'Sel'} · klik untuk ${row.selected ? 'uncheck' : 'check'}` : value} onClick={() => { setSelectedCell({ address, value }); if (row) updateRow(row.id, 'selected', !row.selected); }} className={`overflow-hidden text-ellipsis whitespace-nowrap border-b border-r border-[#d5d5d5] px-2 text-left ${row ? 'cursor-pointer' : ''} ${isMajorSection && value ? 'font-bold tracking-wide' : isSectionRow && value ? 'font-semibold' : !row && value ? 'font-medium' : ''}`}>{value}</button>;
                                     })}
                                     {row ? <>
                                         <div className={`flex items-center border-b border-r border-[#d5d5d5] px-1 ${comfortableView ? 'py-1' : 'py-0.5'}`}>
