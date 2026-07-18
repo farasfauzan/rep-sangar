@@ -99,6 +99,14 @@ class RabBudget extends Model
             ->update(['status' => self::STATUS_PENDING]);
     }
 
+    // Submit only the selected draft items for approval.
+    public static function submitSelected(array $itemIds): int
+    {
+        return static::whereIn('id', $itemIds)
+            ->where('status', self::STATUS_DRAFT)
+            ->update(['status' => self::STATUS_PENDING]);
+    }
+
     // Approve (bulk — all pending items for a project)
     public static function approveAll(int $projectId, User $user): int
     {

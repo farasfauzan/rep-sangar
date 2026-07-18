@@ -522,8 +522,14 @@ class RabBudgetController extends Controller
 
     public function submitForApproval(Request $request)
     {
-        $request->validate(['project_id' => 'required|exists:projects,id']);
-        $count = RabBudget::submitForApproval($request->project_id);
+        $request->validate([
+            'project_id' => 'required_without:item_ids|exists:projects,id',
+            'item_ids' => 'required_without:project_id|array|min:1',
+            'item_ids.*' => 'integer|exists:rab_budgets,id',
+        ]);
+        $count = $request->has('item_ids')
+            ? RabBudget::submitSelected($request->item_ids)
+            : RabBudget::submitForApproval($request->project_id);
         if ($count > 0) {
             $this->notifications->toRole(
                 'ENGINEER',
