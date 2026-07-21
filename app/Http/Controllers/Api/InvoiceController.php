@@ -14,9 +14,11 @@ use App\Models\Spk;
 use App\Models\Transaction;
 use App\Services\WorkflowNotificationService;
 use App\Support\WorkflowState;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\Rule;
 
 class InvoiceController extends Controller
@@ -25,7 +27,7 @@ class InvoiceController extends Controller
     {
     }
 
-    public function index(Request $request)
+    public function index(Request $request): JsonResponse
     {
         $perPage = min($request->query('per_page', 15), 100);
 
@@ -34,7 +36,7 @@ class InvoiceController extends Controller
         );
     }
 
-    public function store(Request $request)
+    public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
             'invoiceable_type' => ['required', 'string', Rule::in([PurchaseOrder::class, Spk::class])],
@@ -52,28 +54,55 @@ class InvoiceController extends Controller
 
         $invoice = DB::transaction(function () use ($validated) {
             if ($validated['invoiceable_type'] === PurchaseOrder::class) {
+                /** @var \App\Models\PurchaseOrder $purchaseOrder */
                 $purchaseOrder = PurchaseOrder::query()
+                    ->with('items.goodsReceiptItems')
                     ->lockForUpdate()
                     ->findOrFail($validated['invoiceable_id']);
 
                 WorkflowState::require(
                     $purchaseOrder->status,
-                    ['RECEIVED'],
-                    'Invoice material hanya dapat dibuat setelah barang diterima.'
+                    ['RECEIVED', 'PARTIALLY_RECEIVED'],
+                    'Invoice material hanya dapat dibuat setelah barang diterima (minimal sebagian).'
                 );
 
-                if (Invoice::where('invoiceable_type', PurchaseOrder::class)
-                    ->where('invoiceable_id', $purchaseOrder->id)
-                    ->exists()) {
-                    WorkflowState::fail('PO ini sudah memiliki invoice. Sistem saat ini mendukung satu invoice penuh per PO.');
+                $receivedSubtotal = 0;
+                foreach ($purchaseOrder->items as $item) {
+                    $receivedQty = $item->goodsReceiptItems->sum('quantity_received');
+                    $receivedSubtotal += $receivedQty * $item->unit_price;
                 }
 
-                $amount = $purchaseOrder->total_amount;
+                if ($receivedSubtotal <= 0) {
+                    WorkflowState::fail('Belum ada penerimaan barang yang dapat ditagihkan.');
+                }
+
+                $poSubtotal = (float) $purchaseOrder->subtotal;
+                $discountRatio = $poSubtotal > 0 ? ((float) $purchaseOrder->discount / $poSubtotal) : 0;
+                $proportionalDiscount = $receivedSubtotal * $discountRatio;
+                
+                $netReceived = $receivedSubtotal - $proportionalDiscount;
+                $tax = $purchaseOrder->include_ppn ? ($netReceived * 0.11) : 0;
+                $totalReceivedValue = round($netReceived + $tax, 2);
+
+                $invoicedAmount = (float) Invoice::where('invoiceable_type', PurchaseOrder::class)
+                    ->where('invoiceable_id', $purchaseOrder->id)
+                    ->where('status', '!=', 'CASHFLOW_REJECTED')
+                    ->sum('amount');
+
+                $amount = round($totalReceivedValue - $invoicedAmount, 2);
+
+                if ($amount <= 0) {
+                    WorkflowState::fail('Seluruh barang yang tiba di lapangan sudah diterbitkan tagihannya.');
+                }
+
                 unset($validated['opname_id']);
             } else {
+                /** @var \App\Models\Spk $spk */
                 $spk = Spk::query()
                     ->lockForUpdate()
                     ->findOrFail($validated['invoiceable_id']);
+                    
+                /** @var \App\Models\Opname $opname */
                 $opname = Opname::query()
                     ->lockForUpdate()
                     ->findOrFail($validated['opname_id']);
@@ -95,7 +124,7 @@ class InvoiceController extends Controller
                 );
 
                 if (Invoice::where('opname_id', $opname->id)->exists()) {
-                    WorkflowState::fail('Opname ini sudah memiliki invoice.');
+                    WorkflowState::fail('Opname progres ini sudah memiliki invoice.');
                 }
 
                 $amount = $opname->amount;
@@ -120,7 +149,7 @@ class InvoiceController extends Controller
         ], 201);
     }
 
-    public function verifyEngineer(Request $request, $id)
+    public function verifyEngineer(Request $request, int $id): JsonResponse
     {
         $invoice = DB::transaction(function () use ($request, $id) {
             $invoice = Invoice::query()->lockForUpdate()->findOrFail($id);
@@ -145,7 +174,7 @@ class InvoiceController extends Controller
         return response()->json(['message' => 'Invoice lolos verifikasi engineer.', 'data' => $invoice]);
     }
 
-    public function verifyFinance(Request $request, $id)
+    public function verifyFinance(Request $request, int $id): JsonResponse
     {
         $invoice = DB::transaction(function () use ($request, $id) {
             $invoice = Invoice::query()->lockForUpdate()->findOrFail($id);
@@ -175,7 +204,7 @@ class InvoiceController extends Controller
         return response()->json(['message' => 'Invoice lolos verifikasi finance dan menunggu approval manajer.', 'data' => $invoice]);
     }
 
-    public function approveManager(Request $request, $id)
+    public function approveManager(Request $request, int $id): JsonResponse
     {
         $invoice = DB::transaction(function () use ($request, $id) {
             $invoice = Invoice::query()->lockForUpdate()->findOrFail($id);
@@ -206,7 +235,7 @@ class InvoiceController extends Controller
         ]);
     }
 
-    public function executePayment(Request $request, $id)
+    public function executePayment(Request $request, int $id): JsonResponse
     {
         $validated = $request->validate([
             'payment_method' => 'required|string',
@@ -238,7 +267,7 @@ class InvoiceController extends Controller
                     'doc_type' => 'BUKTI_BAYAR',
                     'file_path' => $proof,
                     'file_name' => $file->getClientOriginalName(),
-                    'uploaded_by' => $request->user()->id,
+                    'uploaded_by' => Auth::id(),
                 ]);
             }
 
@@ -274,7 +303,7 @@ class InvoiceController extends Controller
         ]);
     }
 
-    public function cashflowApprove(Request $request, $id)
+    public function cashflowApprove(Request $request, int $id): JsonResponse
     {
         $validated = $request->validate([
             'cashflow_status' => ['required', Rule::in(['APPROVED', 'REJECTED'])],
@@ -310,7 +339,7 @@ class InvoiceController extends Controller
         ]);
     }
 
-    public function uploadAttachment(Request $request, $id)
+    public function uploadAttachment(Request $request, int $id): JsonResponse
     {
         $invoice = Invoice::findOrFail($id);
         $validated = $request->validate([
@@ -324,13 +353,13 @@ class InvoiceController extends Controller
             'doc_type' => $validated['doc_type'],
             'file_path' => $path,
             'file_name' => $file->getClientOriginalName(),
-            'uploaded_by' => $request->user()->id,
+            'uploaded_by' => Auth::id(),
         ]);
 
         return response()->json(['message' => 'Dokumen tagihan diunggah.', 'data' => $attachment], 201);
     }
 
-    public function deleteAttachment(InvoiceAttachment $attachment)
+    public function deleteAttachment(InvoiceAttachment $attachment): JsonResponse
     {
         if ($attachment->file_path && Storage::disk('public')->exists($attachment->file_path)) {
             Storage::disk('public')->delete($attachment->file_path);
@@ -374,7 +403,7 @@ class InvoiceController extends Controller
                 'reference_type' => Transaction::class,
                 'reference_id' => $transaction->id,
                 'project_id' => $projectId,
-                'created_by' => auth()->id(),
+                'created_by' => Auth::id(),
             ]);
         }
     }
@@ -393,7 +422,7 @@ class InvoiceController extends Controller
         ApprovalLog::create([
             'record_type' => Invoice::class,
             'record_id' => $invoice->id,
-            'user_id' => $request->user()->id ?? 1,
+            'user_id' => Auth::id() ?? 1,
             'action' => $action,
         ]);
     }

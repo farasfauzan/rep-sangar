@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\DB;
 
 class OpnameController extends Controller
 {
-    public function index(Request $request)
+    public function index(Request $request): JsonResponse
     {
         $perPage = min($request->query('per_page', 15), 100);
 
@@ -22,8 +22,9 @@ class OpnameController extends Controller
         );
     }
 
-    public function store(Request $request)
+    public function store(Request $request): JsonResponse
     {
+        // Parameter 'amount' dihapus dari validasi karena sistem yang akan menghitungnya
         $validated = $request->validate([
             'spk_id' => 'required|exists:spks,id',
             'opname_number' => 'required|string|unique:opnames,opname_number',
@@ -33,32 +34,36 @@ class OpnameController extends Controller
             'progress_items' => 'nullable|array',
             'progress_items.*.description' => 'required|string',
             'progress_items.*.done' => 'required|boolean',
-            'amount' => 'required|numeric|min:0.01',
         ]);
 
         $opname = DB::transaction(function () use ($validated) {
             $spk = Spk::query()->lockForUpdate()->findOrFail($validated['spk_id']);
+            
             WorkflowState::require(
                 $spk->status,
                 ['APPROVED'],
                 'Opname hanya dapat dibuat untuk SPK yang sudah disetujui.'
             );
 
+            // Hanya menjumlahkan akumulasi progres persentase
             $reserved = Opname::query()
                 ->where('spk_id', $spk->id)
                 ->whereIn('status', ['PENDING', 'APPROVED'])
-                ->selectRaw('COALESCE(SUM(progress_percentage), 0) AS progress, COALESCE(SUM(amount), 0) AS amount')
+                ->selectRaw('COALESCE(SUM(progress_percentage), 0) AS progress')
                 ->first();
 
             if ((float) $reserved->progress + (float) $validated['progress_percentage'] > 100) {
                 WorkflowState::fail('Akumulasi progres opname tidak boleh melebihi 100%.');
             }
 
-            if ((float) $reserved->amount + (float) $validated['amount'] > (float) $spk->total_amount) {
-                WorkflowState::fail('Akumulasi nilai opname tidak boleh melebihi nilai total SPK.');
-            }
+            // PERBAIKAN: Hitung nilai uang (amount) secara otomatis di backend
+            $calculatedAmount = ((float) $validated['progress_percentage'] / 100) * (float) $spk->total_amount;
+            $calculatedAmount = round($calculatedAmount, 2);
 
-            return Opname::create($validated + ['status' => 'PENDING']);
+            return Opname::create($validated + [
+                'amount' => $calculatedAmount,
+                'status' => 'PENDING'
+            ]);
         });
 
         return response()->json([
@@ -67,7 +72,7 @@ class OpnameController extends Controller
         ], 201);
     }
 
-    public function approve(Request $request, $id)
+    public function approve(Request $request, int $id): JsonResponse
     {
         $result = DB::transaction(function () use ($request, $id) {
             $opname = Opname::where('id', $id)->lockForUpdate()->firstOrFail();
@@ -92,7 +97,7 @@ class OpnameController extends Controller
         return response()->json(['message' => 'Opname disetujui dan siap dibuatkan invoice.', 'data' => $result]);
     }
 
-    public function reject(Request $request, $id)
+    public function reject(Request $request, int $id): JsonResponse
     {
         $result = DB::transaction(function () use ($request, $id) {
             $opname = Opname::where('id', $id)->lockForUpdate()->firstOrFail();

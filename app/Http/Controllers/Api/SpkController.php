@@ -8,6 +8,7 @@ use App\Models\PurchaseOrder;
 use App\Models\Spk;
 use App\Services\WorkflowNotificationService;
 use App\Support\WorkflowState;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -17,19 +18,19 @@ class SpkController extends Controller
     {
     }
 
-    public function index(Request $request)
+    public function index(Request $request): JsonResponse
     {
         $perPage = min($request->query('per_page', 15), 100);
 
         return response()->json(Spk::with(['project', 'sourcePo'])->latest()->paginate($perPage));
     }
 
-    public function show($id)
+    public function show(int $id): JsonResponse
     {
         return response()->json(Spk::with(['project', 'sourcePo', 'progress'])->findOrFail($id));
     }
 
-    public function store(Request $request)
+    public function store(Request $request): JsonResponse
     {
         if ($request->filled('po_id') && ! $request->filled('source_po_id')) {
             $request->merge(['source_po_id' => $request->input('po_id')]);
@@ -39,7 +40,7 @@ class SpkController extends Controller
             'project_id'    => 'required|exists:projects,id',
             'source_po_id'  => 'nullable|integer|exists:purchase_orders,id',
             'spk_number'    => 'required|string|unique:spks,spk_number',
-            'spk_type'      => 'required|string|in:SUBKON,MANDOR',
+            'spk_type'      => 'required|string|in:SUBKON,MANDOR,ALAT',
             'subcon_name'   => 'required|string',
             'subtotal'      => 'required|numeric|min:0',
             'include_ppn'   => 'boolean',
@@ -47,9 +48,12 @@ class SpkController extends Controller
             'jadwal_kirim'  => 'nullable|date',
         ]);
 
+        // Solusi error Expected type 'object'. Found 'array<...>': Menambahkan DocBlock
+        /** @var \App\Models\PurchaseOrder|null $sourcePo */
         $sourcePo = ! empty($validated['source_po_id'])
             ? PurchaseOrder::with('items.rabBudget')->findOrFail($validated['source_po_id'])
             : null;
+
         if ($sourcePo && ($sourcePo->po_level !== 'PROJECT' || $sourcePo->routed_to !== 'SPK' || $sourcePo->status !== 'ROUTED')) {
             return response()->json([
                 'message' => 'SPK harus berasal dari PO Proyek yang sudah diarahkan Engineer ke SPK.',
@@ -61,24 +65,31 @@ class SpkController extends Controller
         if ($sourcePo && $sourcePo->childSpks()->exists()) {
             return response()->json(['message' => 'PO Proyek ini sudah memiliki SPK turunan.'], 422);
         }
+
         if ($sourcePo) {
             $categories = $sourcePo->items
                 ->pluck('rabBudget')
                 ->filter()
                 ->map(fn ($rab) => $rab->base_category)
                 ->unique();
+
             if ($categories->count() !== 1) {
                 return response()->json(['message' => 'PO sumber SPK harus berisi tepat satu kategori RAB.'], 422);
             }
+
             $category = $categories->first();
+
             if ($category === 'Material') {
                 return response()->json(['message' => 'Kategori Material harus diproses melalui PO Supplier, bukan SPK.'], 422);
             }
             if ($category === 'Pekerja' && $validated['spk_type'] !== 'MANDOR') {
                 return response()->json(['message' => 'Kategori Pekerja harus dibuat sebagai SPK Mandor.'], 422);
             }
-            if ($category !== 'Pekerja' && $validated['spk_type'] === 'MANDOR') {
-                return response()->json(['message' => 'SPK Mandor hanya untuk RAB kategori Pekerja.'], 422);
+            if ($category === 'Alat' && $validated['spk_type'] !== 'ALAT') {
+                return response()->json(['message' => 'Kategori Alat harus dibuat sebagai SPK Alat.'], 422);
+            }
+            if ($category === 'Subkon' && $validated['spk_type'] !== 'SUBKON') {
+                return response()->json(['message' => 'Kategori Subkon harus dibuat sebagai SPK Subkon.'], 422);
             }
         }
 
@@ -98,7 +109,7 @@ class SpkController extends Controller
             'payment_terms' => $validated['payment_terms'] ?? null,
             'jadwal_kirim'  => $validated['jadwal_kirim'] ?? null,
             'status'        => 'DRAFT',
-            'created_by'    => $request->user()->id,
+            'created_by'    => $request->user()?->id,
         ]);
 
         return response()->json([
@@ -107,7 +118,7 @@ class SpkController extends Controller
         ], 201);
     }
 
-    public function submit(Request $request, $id)
+    public function submit(Request $request, int $id): JsonResponse
     {
         $spk = DB::transaction(function () use ($request, $id) {
             $spk = Spk::lockForUpdate()->findOrFail($id);
@@ -135,7 +146,7 @@ class SpkController extends Controller
         return response()->json(['message' => 'SPK dikirim ke Manajer Komersial untuk approval.', 'data' => $spk]);
     }
 
-    public function approve(Request $request, $id)
+    public function approve(Request $request, int $id): JsonResponse
     {
         $spk = DB::transaction(function () use ($request, $id) {
             $spk = Spk::lockForUpdate()->findOrFail($id);
@@ -146,7 +157,7 @@ class SpkController extends Controller
             );
             $spk->update([
                 'status' => 'APPROVED',
-                'approved_by' => $request->user()->id,
+                'approved_by' => $request->user()?->id,
             ]);
             $this->log($request, $spk, 'APPROVE');
 
@@ -164,7 +175,7 @@ class SpkController extends Controller
         return response()->json(['message' => 'SPK disetujui dan diteruskan ke proses opname.', 'data' => $spk]);
     }
 
-    public function reject(Request $request, $id)
+    public function reject(Request $request, int $id): JsonResponse
     {
         $spk = DB::transaction(function () use ($request, $id) {
             $spk = Spk::lockForUpdate()->findOrFail($id);
@@ -189,7 +200,7 @@ class SpkController extends Controller
         ApprovalLog::create([
             'record_type' => Spk::class,
             'record_id' => $spk->id,
-            'user_id' => $request->user()->id,
+            'user_id' => $request->user()?->id,
             'action' => $action,
             'notes' => $notes,
         ]);

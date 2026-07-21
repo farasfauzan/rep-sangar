@@ -10,6 +10,7 @@ use App\Models\PurchaseOrder;
 use App\Models\RabBudget;
 use App\Services\WorkflowNotificationService;
 use App\Support\WorkflowState;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -20,7 +21,7 @@ class PurchaseOrderController extends Controller
     {
     }
 
-    public function index(Request $request)
+    public function index(Request $request): JsonResponse
     {
         $perPage = min($request->query('per_page', 15), 100);
         $search = $request->query('search');
@@ -42,17 +43,15 @@ class PurchaseOrderController extends Controller
         return response()->json($query->paginate($perPage));
     }
 
-    public function store(Request $request)
+    public function store(Request $request): JsonResponse
     {
         $poLevel = $request->input('po_level', 'PROJECT');
 
-        // LAPANGAN can only create PROJECT level POs
         $user = $request->user();
         if ($poLevel === 'SUPPLIER' && $user->role && $user->role->role_name === 'LAPANGAN') {
             return response()->json(['message' => 'Lapangan tidak bisa membuat PO Supplier.'], 403);
         }
 
-        // Base validation (both levels)
         $rules = [
             'project_id' => 'required|exists:projects,id',
             'parent_po_id' => 'nullable|integer|exists:purchase_orders,id',
@@ -68,7 +67,6 @@ class PurchaseOrderController extends Controller
         ];
 
         if ($poLevel === 'SUPPLIER') {
-            // Supplier PO: supplier + pricing required
             $rules['supplier_id'] = 'nullable|exists:suppliers,id';
             $rules['supplier_name'] = 'required|string';
             $rules['supplier_address'] = 'nullable|string';
@@ -85,7 +83,6 @@ class PurchaseOrderController extends Controller
             $rules['jadwal_kirim'] = 'nullable|date';
             $rules['items.*.unit_price'] = 'required|numeric|min:0';
         } else {
-            // Project PO: lapangan input, no pricing
             $rules['supplier_name'] = 'nullable|string';
             $rules['items.*.unit_price'] = 'nullable|numeric|min:0';
         }
@@ -94,6 +91,7 @@ class PurchaseOrderController extends Controller
 
         if ($poLevel === 'SUPPLIER') {
             if (! empty($validated['parent_po_id'])) {
+                /** @var \App\Models\PurchaseOrder $parent */
                 $parent = PurchaseOrder::with('items')->findOrFail($validated['parent_po_id']);
                 if ($parent->po_level !== 'PROJECT' || $parent->routed_to !== 'PURCHASE_ORDER' || $parent->status !== 'ROUTED') {
                 return response()->json([
@@ -113,6 +111,8 @@ class PurchaseOrderController extends Controller
                     ], 422);
                     }
                 }
+            } else {
+                return response()->json(['message' => 'PO Supplier harus memiliki referensi PO Proyek sumber.'], 422);
             }
         }
 
@@ -190,7 +190,6 @@ class PurchaseOrderController extends Controller
                     ]);
                 }
 
-                // Only calculate pricing for supplier-level POs
                 if ($poLevel === 'SUPPLIER') {
                     $discount = $validated['discount'] ?? 0;
                     $subtotalAfterDiscount = $subtotal - $discount;
@@ -226,7 +225,7 @@ class PurchaseOrderController extends Controller
         }
     }
 
-    public function show($id)
+    public function show(int $id): JsonResponse
     {
         $po = PurchaseOrder::with([
             'items.rabBudget', 'project', 'parentPo', 'childPurchaseOrders', 'childSpks', 'attachments.uploader',
@@ -234,7 +233,7 @@ class PurchaseOrderController extends Controller
         return response()->json($po);
     }
 
-    public function update(Request $request, $id)
+    public function update(Request $request, int $id): JsonResponse
     {
         $po = PurchaseOrder::findOrFail($id);
         WorkflowState::require($po->status, ['DRAFT'], 'Hanya PO DRAFT yang bisa diedit.');
@@ -287,7 +286,7 @@ class PurchaseOrderController extends Controller
         return response()->json(['message' => 'PO berhasil diupdate.', 'data' => $po->load('items.rabBudget')]);
     }
 
-    public function submit(Request $request, $id)
+    public function submit(Request $request, int $id): JsonResponse
     {
         $po = DB::transaction(function () use ($request, $id) {
             $po = PurchaseOrder::with('items.rabBudget')->lockForUpdate()->findOrFail($id);
@@ -318,7 +317,7 @@ class PurchaseOrderController extends Controller
         return response()->json(['message' => 'PO dikirim ke Manajer Komersial untuk approval.', 'data' => $po]);
     }
 
-    public function approve(Request $request, $id)
+    public function approve(Request $request, int $id): JsonResponse
     {
         $po = DB::transaction(function () use ($request, $id) {
             $po = PurchaseOrder::lockForUpdate()->findOrFail($id);
@@ -352,7 +351,7 @@ class PurchaseOrderController extends Controller
         return response()->json(['message' => 'PO disetujui dan diteruskan ke proses penerimaan barang.', 'data' => $po]);
     }
 
-    public function reject(Request $request, $id)
+    public function reject(Request $request, int $id): JsonResponse
     {
         $po = DB::transaction(function () use ($request, $id) {
             $po = PurchaseOrder::lockForUpdate()->findOrFail($id);
@@ -372,7 +371,7 @@ class PurchaseOrderController extends Controller
         return response()->json(['message' => 'PO ditolak.', 'data' => $po]);
     }
 
-    public function uploadAttachment(Request $request, $poId)
+    public function uploadAttachment(Request $request, int $poId): JsonResponse
     {
         $po = PurchaseOrder::findOrFail($poId);
 
@@ -400,7 +399,7 @@ class PurchaseOrderController extends Controller
         ], 201);
     }
 
-    public function deleteAttachment(PoAttachment $attachment)
+    public function deleteAttachment(PoAttachment $attachment): JsonResponse
     {
         if (Storage::disk('public')->exists($attachment->file_path)) {
             Storage::disk('public')->delete($attachment->file_path);
@@ -411,7 +410,7 @@ class PurchaseOrderController extends Controller
         return response()->json(['message' => 'File berhasil dihapus.']);
     }
 
-    public function getAttachments($poId)
+    public function getAttachments(int $poId): JsonResponse
     {
         $po = PurchaseOrder::findOrFail($poId);
         $attachments = $po->attachments()->with('uploader')->latest()->get();
@@ -419,7 +418,7 @@ class PurchaseOrderController extends Controller
         return response()->json($attachments);
     }
 
-    public function route(Request $request, $id)
+    public function route(Request $request, int $id): JsonResponse
     {
         $validated = $request->validate([
             'routed_to' => 'required|in:PURCHASE_ORDER,SPK',

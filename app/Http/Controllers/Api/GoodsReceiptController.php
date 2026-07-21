@@ -10,13 +10,16 @@ use App\Models\InventoryStock;
 use App\Models\PoItem;
 use App\Models\PurchaseOrder;
 use App\Models\RabBudget;
+use App\Models\StockMovement;
 use App\Support\WorkflowState;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 
 class GoodsReceiptController extends Controller
 {
-    public function index(Request $request)
+    public function index(Request $request): JsonResponse
     {
         $perPage = min($request->query('per_page', 15), 100);
 
@@ -25,14 +28,14 @@ class GoodsReceiptController extends Controller
         );
     }
 
-    public function getByPo($poId)
+    public function getByPo(int $poId): JsonResponse
     {
         return response()->json(
             GoodsReceipt::with('items.poItem')->where('purchase_order_id', $poId)->get()
         );
     }
 
-    public function store(Request $request)
+    public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
             'purchase_order_id' => 'required|exists:purchase_orders,id',
@@ -41,12 +44,13 @@ class GoodsReceiptController extends Controller
             'delivery_note_number' => 'nullable|string',
             'receiver_name' => 'required|string',
             'notes' => 'nullable|string',
-            'items' => 'nullable|array|min:1',
-            'items.*.po_item_id' => 'required_with:items|integer|exists:po_items,id',
-            'items.*.quantity_received' => 'required_with:items|numeric|min:0.01',
+            // PERBAIKAN: Diwajibkan (required). Tidak boleh ada penerimaan otomatis (gaib).
+            'items' => 'required|array|min:1',
+            'items.*.po_item_id' => 'required|integer|exists:po_items,id',
+            'items.*.quantity_received' => 'required|numeric|min:0.01',
         ]);
 
-        $gr = DB::transaction(function () use ($validated, $request) {
+        $gr = DB::transaction(function () use ($validated) {
             $po = PurchaseOrder::query()
                 ->with('items.rabBudget')
                 ->lockForUpdate()
@@ -58,14 +62,15 @@ class GoodsReceiptController extends Controller
                 'Penerimaan barang hanya dapat dicatat untuk PO yang sudah disetujui atau diterima sebagian.'
             );
 
-            $receiptItems = $this->resolveReceiptItems($po, $validated['items'] ?? []);
+            $receiptItems = $this->resolveReceiptItems($po, $validated['items']);
             if ($receiptItems === []) {
-                WorkflowState::fail('Tidak ada sisa kuantitas PO yang dapat diterima.');
+                WorkflowState::fail('Data item penerimaan tidak valid atau kuantitas sisa sudah habis.');
             }
+            
             foreach ($receiptItems as $receiptItem) {
                 $rab = $receiptItem['po_item']->rabBudget;
                 if (! $rab || ! $rab->isMaterial()) {
-                    WorkflowState::fail('Penerimaan barang hanya untuk item RAB kategori Material. Subkon, Pekerja, dan Alat diproses melalui SPK/opname.');
+                    WorkflowState::fail('Penerimaan barang hanya untuk item RAB kategori Material. Subkon, Pekerja, dan Alat diproses melalui SPK/Opname.');
                 }
             }
 
@@ -84,7 +89,7 @@ class GoodsReceiptController extends Controller
             ApprovalLog::create([
                 'record_type' => PurchaseOrder::class,
                 'record_id' => $po->id,
-                'user_id' => $request->user()?->id,
+                'user_id' => Auth::id() ?? 1,
                 'action' => 'RECEIVE',
                 'notes' => "Penerimaan barang {$receipt->receipt_number}",
             ]);
@@ -112,37 +117,24 @@ class GoodsReceiptController extends Controller
             ->groupBy('po_item_id')
             ->pluck('quantity_received', 'po_item_id');
 
-        if ($requestedItems === []) {
-            return $po->items
-                ->map(function (PoItem $item) use ($receivedQuantities) {
-                    $remaining = (float) $item->qty - (float) ($receivedQuantities[$item->id] ?? 0);
-
-                    return $remaining > 0 ? [
-                        'po_item' => $item,
-                        'quantity_received' => $remaining,
-                    ] : null;
-                })
-                ->filter()
-                ->values()
-                ->all();
-        }
-
         $poItems = $po->items->keyBy('id');
         $normalized = [];
+        
         foreach ($requestedItems as $requestedItem) {
             $poItem = $poItems->get($requestedItem['po_item_id']);
             if (! $poItem) {
                 WorkflowState::fail('Item penerimaan harus berasal dari PO yang dipilih.');
             }
 
-            $quantity = (float) $requestedItem['quantity_received'];
+            // PERBAIKAN: Menggunakan pembulatan 4 desimal untuk mencegah error komparasi Float di PHP
+            $quantity = round((float) $requestedItem['quantity_received'], 4);
             $normalized[$poItem->id] = ($normalized[$poItem->id] ?? 0) + $quantity;
         }
 
         return collect($normalized)
             ->map(function (float $quantity, int $poItemId) use ($poItems, $receivedQuantities) {
                 $poItem = $poItems->get($poItemId);
-                $remaining = (float) $poItem->qty - (float) ($receivedQuantities[$poItemId] ?? 0);
+                $remaining = round((float) $poItem->qty - (float) ($receivedQuantities[$poItemId] ?? 0), 4);
 
                 if ($quantity > $remaining) {
                     WorkflowState::fail("Jumlah penerimaan {$poItem->item_name} melebihi sisa PO.");
@@ -163,7 +155,7 @@ class GoodsReceiptController extends Controller
             ->pluck('quantity_received', 'po_item_id');
 
         return $po->items->every(
-            fn (PoItem $item) => (float) ($receivedQuantities[$item->id] ?? 0) >= (float) $item->qty
+            fn (PoItem $item) => round((float) ($receivedQuantities[$item->id] ?? 0), 4) >= round((float) $item->qty, 4)
         ) ? 'RECEIVED' : 'PARTIALLY_RECEIVED';
     }
 
@@ -194,5 +186,14 @@ class GoodsReceiptController extends Controller
         }
 
         $stock->increment('quantity', $quantity);
+
+        // PERBAIKAN: Suntikkan pencatatan historis StockMovement agar sesuai dengan InventoryController
+        StockMovement::create([
+            'inventory_stock_id' => $stock->id,
+            'type' => 'in',
+            'quantity' => $quantity,
+            'notes' => "Penerimaan Material dari PO: {$po->po_number}",
+            'created_by' => Auth::id() ?? 1,
+        ]);
     }
 }

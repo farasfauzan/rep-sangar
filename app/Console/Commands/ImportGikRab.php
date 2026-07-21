@@ -6,6 +6,7 @@ use Illuminate\Console\Command;
 use App\Models\Project;
 use App\Models\RabBudget;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use Illuminate\Support\Facades\DB;
 
 class ImportGikRab extends Command
 {
@@ -18,8 +19,6 @@ class ImportGikRab extends Command
     {
         $this->info('Starting GIK UGM RAB import...');
 
-        // This workbook is large and contains formulas that refer to other
-        // sheets. Give PhpSpreadsheet enough headroom to evaluate them.
         ini_set('memory_limit', '512M');
         
         // 1. Get Project
@@ -30,7 +29,7 @@ class ImportGikRab extends Command
         }
         $this->info("Project: {$project->project_name} (ID: {$project->id})");
         
-        // 2. Load Excel
+        // 2. Load Excel (Optimized Memory)
         $filePath = storage_path('app/excel/C.1 RAB GIK UGM Ulang.xlsx');
         if (!file_exists($filePath)) {
             $this->error("File not found: $filePath");
@@ -38,9 +37,11 @@ class ImportGikRab extends Command
         }
         
         $this->info("Loading Excel file...");
-        $spreadsheet = IOFactory::load($filePath);
-        $sheet = $spreadsheet->getSheetByName('RAB GIK UGM');
+        $reader = IOFactory::createReaderForFile($filePath);
+        $reader->setReadDataOnly(true); // Abaikan styling UI Excel untuk hemat RAM
+        $spreadsheet = $reader->load($filePath);
         
+        $sheet = $spreadsheet->getSheetByName('RAB GIK UGM');
         if (!$sheet) {
             $this->error('Sheet "RAB GIK UGM" not found!');
             return 1;
@@ -54,15 +55,13 @@ class ImportGikRab extends Command
         $currentSubCategory = null;
         $itemNo = 0;
         
-        foreach ($sheet->getRowIterator(9) as $row) { // row 8 is the 1..6 column-number header
+        foreach ($sheet->getRowIterator(9) as $row) {
             $rowNumber = $row->getRowIndex();
             $cells = [];
             foreach (range('A', 'G') as $column) {
                 $cells[$column] = $this->cellValue($sheet->getCell($column.$rowNumber));
             }
 
-            // This RAB's layout is A=nomor/seksi, C=uraian, D=satuan,
-            // E=volume, F=harga satuan, G=jumlah. Column B is intentionally blank.
             $sectionCode = trim($this->stringValue($cells['A'] ?? null));
             $uraianStr = trim($this->stringValue($cells['C'] ?? null));
             $satuan = $this->stringValue($cells['D'] ?? null);
@@ -72,21 +71,17 @@ class ImportGikRab extends Command
 
             if ($uraianStr === '') continue;
             
-            // Section headers
-            if (preg_match('/^[A-Z]+\.?$/', $sectionCode)
-                && stripos($uraianStr, 'MATA PEMBAYARAN') !== false) {
+            if (preg_match('/^[A-Z]+\.?$/', $sectionCode) && stripos($uraianStr, 'MATA PEMBAYARAN') !== false) {
                 $currentCategory = $uraianStr;
                 $currentSubCategory = null;
                 continue;
             }
 
-            if ($volume === null && $harga === null && $jumlah === null
-                && preg_match('/PEKERJAAN|STRUKTUR|ARSITEKTUR|MEP|UTAMA|PERSIAPAN|SMKKK/i', $uraianStr)) {
+            if ($volume === null && $harga === null && $jumlah === null && preg_match('/PEKERJAAN|STRUKTUR|ARSITEKTUR|MEP|UTAMA|PERSIAPAN|SMKKK/i', $uraianStr)) {
                 $currentSubCategory = $uraianStr;
                 continue;
             }
             
-            // Skip headers
             if ($volume === null && $harga === null && $jumlah === null) continue;
             
             $vol = $this->numericValue($volume);
@@ -113,15 +108,6 @@ class ImportGikRab extends Command
         }
         
         $this->info("Parsed " . count($items) . " items");
-        $this->table(
-            ['Uraian', 'Volume', 'Harga Satuan', 'Jumlah'],
-            collect($items)->take(5)->map(fn (array $item) => [
-                $item['description'],
-                number_format($item['qty'], 2, ',', '.'),
-                number_format($item['price'], 2, ',', '.'),
-                number_format($item['total'], 2, ',', '.'),
-            ])->all()
-        );
 
         if ($this->option('dry-run')) {
             $this->info('Dry run selesai. Tidak ada data RAB yang diubah.');
@@ -133,67 +119,67 @@ class ImportGikRab extends Command
             return self::SUCCESS;
         }
 
-        $existingCount = RabBudget::where('project_id', $project->id)->count();
-        if ($existingCount > 0) {
-            $this->warn("Mengarsipkan {$existingCount} data RAB GIK UGM lama sebelum impor ulang.");
-            RabBudget::where('project_id', $project->id)->delete();
-        }
-        
-        // 3. Create categories
-        $this->info("Creating categories...");
-        $categories = [];
-        foreach ($items as $item) {
-            $catName = $item['category'] ?? 'Umum';
-            if (!isset($categories[$catName])) {
-                $cat = RabBudget::firstOrCreate(
-                    ['description' => $catName, 'project_id' => $project->id, 'parent_id' => null],
-                    [
-                        'project_id' => $project->id,
-                        'code_item' => 'CAT-' . strtoupper(substr($catName, 0, 3)),
-                        'description' => $catName,
-                        'unit' => '',
-                        'volume' => 0,
-                        'unit_price' => 0,
-                        'total_price' => 0,
-                        'category' => $catName,
-                        'status' => 'APPROVED',
-                    ]
-                );
-                $categories[$catName] = $cat->id;
-                $this->line("  Category: {$catName} (ID: {$cat->id})");
+        // 4. Proses Database dengan Transaction & Bulk Insert
+        DB::transaction(function () use ($project, $items) {
+            $existingCount = RabBudget::where('project_id', $project->id)->count();
+            if ($existingCount > 0) {
+                $this->warn("Menghapus {$existingCount} data RAB lama...");
+                RabBudget::where('project_id', $project->id)->delete();
             }
-        }
-        
-        // 4. Import items
-        $this->info("Importing " . count($items) . " RAB items...");
-        $batchSize = 100;
-        $total = count($items);
-        
-        foreach (array_chunk($items, 100) as $batchIndex => $batch) {
-            $this->line("  Batch " . ($batchIndex + 1) . " (" . count($batch) . " items)...");
             
-            foreach ($batch as $item) {
-                if (empty($item['description'])) continue;
-                
+            $this->info("Creating categories...");
+            $categories = [];
+            foreach ($items as $item) {
                 $catName = $item['category'] ?? 'Umum';
-                $parentId = $categories[$catName] ?? null;
-                
-                RabBudget::create([
-                    'project_id' => $project->id,
-                    'parent_id' => $parentId,
-                    'code_item' => $item['code'] ?? 'ITEM-' . $item['item_no'],
-                    'description' => $item['description'],
-                    'unit' => $item['unit'],
-                    'volume' => $item['qty'],
-                    'unit_price' => $item['price'],
-                    'total_price' => $item['total'],
-                    'category' => $item['category'],
-                    'status' => 'DRAFT',
-                ]);
+                if (!isset($categories[$catName])) {
+                    $cat = RabBudget::firstOrCreate(
+                        ['description' => $catName, 'project_id' => $project->id, 'parent_id' => null],
+                        [
+                            'code_item' => 'CAT-' . strtoupper(substr($catName, 0, 3)),
+                            'unit' => '',
+                            'volume' => 0,
+                            'unit_price' => 0,
+                            'total_price' => 0,
+                            'category' => $catName,
+                            'status' => 'APPROVED',
+                        ]
+                    );
+                    $categories[$catName] = $cat->id;
+                    $this->line("  Category: {$catName} (ID: {$cat->id})");
+                }
             }
             
-            $this->line("  Done batch " . ($batchIndex + 1));
-        }
+            $this->info("Importing " . count($items) . " RAB items via Bulk Insert...");
+            
+            foreach (array_chunk($items, 100) as $batchIndex => $batch) {
+                $insertData = [];
+                
+                foreach ($batch as $item) {
+                    if (empty($item['description'])) continue;
+                    
+                    $catName = $item['category'] ?? 'Umum';
+                    $parentId = $categories[$catName] ?? null;
+                    
+                    $insertData[] = [
+                        'project_id' => $project->id,
+                        'parent_id' => $parentId,
+                        'code_item' => $item['code'] ?? 'ITEM-' . $item['item_no'],
+                        'description' => $item['description'],
+                        'unit' => $item['unit'],
+                        'volume' => $item['qty'],
+                        'unit_price' => $item['price'],
+                        'total_price' => $item['total'],
+                        'category' => $item['category'],
+                        'status' => 'DRAFT',
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ];
+                }
+                
+                RabBudget::insert($insertData);
+                $this->line("  Done batch " . ($batchIndex + 1));
+            }
+        });
         
         $this->info('Import complete! Total: ' . count($items) . ' items');
         return 0;
@@ -204,7 +190,6 @@ class ImportGikRab extends Command
         if ($value instanceof \PhpOffice\PhpSpreadsheet\RichText\RichText) {
             return $value->getPlainText();
         }
-
         return trim((string) $value);
     }
 
@@ -239,8 +224,6 @@ class ImportGikRab extends Command
             return $value;
         }
 
-        // Excel stored the calculated formula result in this workbook. Reading
-        // it directly avoids recalculating every cross-sheet formula in PHP.
         $cachedValue = $cell->getOldCalculatedValue();
         return $cachedValue ?? $cell->getCalculatedValue();
     }
