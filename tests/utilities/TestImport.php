@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Console\Commands;
+namespace Tests\Utilities;
 
 use Illuminate\Console\Command;
 use App\Http\Controllers\Api\RabBudgetController;

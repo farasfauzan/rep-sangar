@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Console\Commands;
+namespace Tests\Utilities;
 
 use App\Services\MimoAiService;
 use Illuminate\Console\Command;

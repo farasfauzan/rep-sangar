@@ -68,7 +68,7 @@ test.describe('2. Dashboard', () => {
     console.log(`✅ Dashboard title: "${title}"`);
   });
 
-  test('2.2 Sidebar menu ADMIN lengkap (14 menu)', async ({ page }) => {
+  test('2.2 Sidebar menu ADMIN lengkap (15 menu)', async ({ page }) => {
     const sidebarLinks = page.locator('aside nav a');
     const count = await sidebarLinks.count();
     console.log(`✅ Admin sidebar menus: ${count}`);
