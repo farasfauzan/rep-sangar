@@ -72,16 +72,14 @@ Route::middleware(['auth:web', 'verified'])->withoutMiddleware([\Illuminate\Foun
         Route::get('/rab', [RabBudgetController::class, 'index']);
         Route::get('/rab/summary', [RabBudgetController::class, 'summary']);
         Route::get('/rab/{id}', [RabBudgetController::class, 'show']);
-        Route::get('/rab/rollup', [RabBudgetController::class, 'rollup']);
+        Route::get('/rab/rollup', [RabBudgetController::class, 'rollUp']);
         Route::get('/rab/export', [RabBudgetController::class, 'export']);
     });
     Route::middleware('role:ADMIN,ENGINEER,MGR_KOMERSIAL')->group(function () {
-        Route::post('/rab', [RabBudgetController::class, 'store']);
         Route::put('/rab/{id}', [RabBudgetController::class, 'update']);
         Route::patch('/rab/{id}', [RabBudgetController::class, 'update']);
         Route::delete('/rab/{id}', [RabBudgetController::class, 'destroy']);
         Route::post('/rab/auto-import', [RabBudgetController::class, 'autoImport']);
-        Route::post('/rab/ai-categorize', [RabBudgetController::class, 'aiCategorize']);
     });
 
     // ─── Purchase Orders ───────────────────────────────────────────────

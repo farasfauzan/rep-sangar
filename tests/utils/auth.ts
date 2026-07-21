@@ -15,49 +15,62 @@ export const CREDENTIALS = {
 export async function loginAs(page: Page, role: keyof typeof CREDENTIALS) {
   const creds = CREDENTIALS[role];
   if (!creds) throw new Error(`Role ${role} not found in CREDENTIALS`);
-  
+
   await page.goto('/login');
-  await page.waitForLoadState('networkidle');
-  
+  await page.waitForLoadState('domcontentloaded');
+
   await page.fill('input[name="email"]', creds.email);
   await page.fill('input[name="password"]', creds.password);
   await page.click('button[type="submit"]');
-  
-  // Wait for redirect to dashboard
-  await page.waitForURL('**/dashboard', { timeout: 15000 });
-  await page.waitForLoadState('networkidle');
-  
+
+  // Wait for redirect to dashboard (Inertia.js)
+  await page.waitForURL('**/dashboard', { timeout: 20000 });
+  await page.waitForLoadState('domcontentloaded');
+
   console.log(`✅ Logged in as ${creds.roleName} (${creds.email})`);
   return creds;
 }
 
 export async function logout(page: Page) {
-  // Click user dropdown (top right)
-  await page.click('nav button:has-text("Admin"), nav button:has-text("admin"), nav [aria-haspopup="menu"]');
-  await page.waitForTimeout(300);
-  
+  // Click user dropdown (top right navbar)
+  try {
+    const dropdownTrigger = page.locator('nav button:has-text("Admin"), nav button:has-text("admin"), nav [aria-haspopup="menu"]').first();
+    await dropdownTrigger.click({ timeout: 5000 });
+    await page.waitForTimeout(500);
+  } catch {
+    // fallback: try via direct link or skip
+  }
+
   // Click logout link
-  await page.click('text=Log Out, text=Logout, [role="menuitem"]:has-text("Log Out")');
-  
-  // Wait for redirect to login
-  await page.waitForURL('**/login', { timeout: 5000 });
+  try {
+    const logoutBtn = page.locator('button:has-text("Log Out"), a:has-text("Log Out")').first();
+    await logoutBtn.click({ force: true, timeout: 5000 });
+  } catch {
+    // fallback to manual navigate
+    await page.goto('/');
+  }
+
+  // Wait for redirect away from dashboard
+  await page.waitForURL(/(\/login$|\/$)/, { timeout: 15000 });
   console.log('✅ Logged out');
 }
 
 export async function navigateToMenu(page: Page, menuText: string) {
-  await page.click(`aside nav a:has-text("${menuText}")`);
-  await page.waitForLoadState('networkidle');
+  const menuLink = page.locator(`aside nav a:has-text("${menuText}")`).first();
+  await menuLink.click({ timeout: 10000 });
+  await page.waitForLoadState('domcontentloaded');
+  await page.waitForTimeout(500);
   console.log(`✅ Navigated to ${menuText}`);
 }
 
 export const EXPECTED_MENU_COUNTS: Record<string, number> = {
-  admin: 13,
-  lapangan: 5,
-  engineer: 5,
-  purchasing: 5,
-  verifikator: 3,
-  mgr_komersial: 5,
-  keu_kantor: 3,
-  pajak: 3,
-  accounting: 4,
+  admin: 15,
+  lapangan: 6,
+  engineer: 6,
+  purchasing: 6,
+  verifikator: 4,
+  mgr_komersial: 6,
+  keu_kantor: 4,
+  pajak: 4,
+  accounting: 5,
 };

@@ -372,7 +372,27 @@ export default function ApprovalDashboard() {
                                         <Td>{docType(invoice)}</Td>
                                         <Td>{invoice.invoiceable?.po_number || invoice.invoiceable?.spk_number || '-'}</Td>
                                         <Td strong>{money(invoice.amount)}</Td>
-                                        <Td>{invoice.status}</Td>
+                                        <Td>
+                                            <div className="flex flex-col gap-1">
+                                                <span className="font-semibold">{invoice.status}</span>
+                                                {(!invoice.missing_documents || invoice.missing_documents.length === 0) ? (
+                                                    <span className="inline-flex items-center text-[11px] font-bold text-emerald-700">
+                                                        ✓ Dokumen Lengkap
+                                                    </span>
+                                                ) : (
+                                                    <div className="flex flex-col gap-0.5">
+                                                        <span className="text-[10px] font-bold text-amber-700">⚠️ Kurang ({invoice.missing_documents.length}):</span>
+                                                        <div className="flex flex-wrap gap-1">
+                                                            {invoice.missing_documents.map((doc) => (
+                                                                <span key={doc} className="rounded bg-rose-100 px-1 py-0.5 text-[9px] font-bold text-rose-700">
+                                                                    {doc}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </Td>
                                         <Td>
                                             {invoice.status === 'PENDING_ENGINEER' && (
                                                 <Button onClick={() => run('put', `/api/invoices/${invoice.id}/engineer-verify`, 'Verifikasi engineer invoice ini?')}>Engineer OK</Button>

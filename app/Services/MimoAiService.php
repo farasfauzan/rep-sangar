@@ -2,16 +2,11 @@
 
 namespace App\Services;
 
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Cache;
-
 class MimoAiService
 {
-    protected string $apiKey;
-    protected string $baseUrl;
-    protected string $model;
-
+    /**
+     * Valid work category names (kategori pekerjaan).
+     */
     private array $validCategories = [
         'Pekerjaan Persiapan',
         'Pekerjaan Tanah',
@@ -33,39 +28,23 @@ class MimoAiService
         'Pekerjaan Mebelair',
     ];
 
-    public function __construct()
-    {
-        $this->apiKey  = config('services.mimo.api_key') ?? '';
-        $this->baseUrl = config('services.mimo.base_url', 'https://api.xiaomimimo.com/v1');
-        $this->model   = config('services.mimo.model', 'mimo-vl-7b');
-    }
+    /**
+     * Resource type constants.
+     */
+    public const TYPE_MATERIAL = 'material';
+    public const TYPE_UPAH     = 'upah';
+    public const TYPE_JASA     = 'jasa';
+    public const TYPE_ALAT     = 'alat';
+    public const TYPE_LAINNYA  = 'lainnya';
 
     public function isConfigured(): bool
     {
-        return $this->apiKey !== '' && $this->apiKey !== 'your-openrouter-api-key-here';
+        // Local classifier — always ready, no external API needed.
+        return true;
     }
 
     /**
-     * Check if AI has been marked temporarily unavailable (e.g. 401/auth error).
-     * Once a hard auth failure occurs, skip API calls for 1 hour to avoid
-     * spamming the endpoint on every row during a large import.
-     */
-    protected function isAiAvailable(): bool
-    {
-        if (!$this->isConfigured()) {
-            return false;
-        }
-        return !Cache::has('mimo_ai_unavailable');
-    }
-
-    protected function markAiUnavailable(int $minutes = 60): void
-    {
-        Cache::put('mimo_ai_unavailable', true, now()->addMinutes($minutes));
-    }
-
-    /**
-     * Classify a single item description. Returns category string or null.
-     * Uses cache to avoid repeated API calls for same/similar descriptions.
+     * Classify a single description into a work category.
      */
     public function classify(string $description): ?string
     {
@@ -73,194 +52,269 @@ class MimoAiService
             return null;
         }
 
-        $cacheKey = 'mimo_cat_' . md5(strtolower(trim($description)));
-        if (Cache::has($cacheKey)) {
-            return Cache::get($cacheKey);
-        }
-
-        // Jika AI tidak tersedia (tidak dikonfigurasi atau circuit-breaker aktif),
-        // langsung pakai fallback keyword
-        if (!$this->isAiAvailable()) {
-            $cat = $this->fallbackClassify($description);
-            Cache::put($cacheKey, $cat, now()->addHours(24));
-            return $cat;
-        }
-
-        $result = $this->classifyBatch([$description]);
-        return $result[0] ?? $this->fallbackClassify($description);
+        return $this->fallbackClassify($description);
     }
 
     /**
-     * Classify multiple descriptions in one API call (batch).
-     * Returns array keyed by input index => category string or null.
+     * Classify multiple descriptions in batch.
      */
     public function classifyBatch(array $descriptions): array
     {
-        if (!$this->isAiAvailable()) {
-            // Fallback keyword-based saat AI tidak tersedia atau sedang cooldown (mis. 401)
-            return array_map(fn($d) => $this->fallbackClassify($d), $descriptions);
-        }
-
-        // Check cache first, collect uncached
-        $cached = [];
-        $uncached = [];
-        $uncachedIdx = [];
-
-        foreach ($descriptions as $i => $desc) {
-            $cacheKey = 'mimo_cat_' . md5(strtolower(trim($desc)));
-            if (Cache::has($cacheKey)) {
-                $cached[$i] = Cache::get($cacheKey);
-            } else {
-                $uncached[] = $desc;
-                $uncachedIdx[] = $i;
-            }
-        }
-
-        if (empty($uncached)) {
-            return $cached;
-        }
-
-        // Build numbered list for prompt
-        $list = '';
-        foreach ($uncached as $j => $desc) {
-            $list .= ($j + 1) . '. ' . trim($desc) . "\n";
-        }
-
-        $categories = implode(', ', $this->validCategories);
-
-        $prompt = "Klasifikasikan setiap item pekerjaan konstruksi berikut ke dalam SATU kategori saja.\n\n"
-            . "Kategori yang tersedia: {$categories}\n\n"
-            . "Item:\n{$list}\n"
-            . "Jawab HANYA dalam format JSON array, misal: [\"Pekerjaan Beton\",\"Pekerjaan Besi\"]\n"
-            . "Jumlah elemen array HARUS sama dengan jumlah item. Jika tidak yakin, gunakan null.";
-
-        try {
-            $response = Http::withToken($this->apiKey)
-                ->timeout(60)
-                ->post($this->baseUrl . '/chat/completions', [
-                    'model'    => $this->model,
-                    'messages' => [
-                        ['role' => 'system', 'content' => 'Kamu adalah ahli klasifikasi pekerjaan konstruksi Indonesia. Jawab hanya JSON array.'],
-                        ['role' => 'user',   'content' => $prompt],
-                    ],
-                    'temperature' => 0.1,
-                    'max_tokens'  => 8000,
-                ]);
-
-            if (!$response->successful()) {
-                Log::warning('MiMo API error', ['status' => $response->status(), 'body' => $response->body()]);
-                // Circuit-breaker: hard auth failure (401/403) → skip API selama 1 jam
-                if (in_array($response->status(), [401, 403], true)) {
-                    $this->markAiUnavailable(60);
-                }
-                return $this->fallbackResults($uncached, $uncachedIdx, $cached);
-            }
-
-            $content = $response->json('choices.0.message.content', '');
-
-            Log::info('MiMo AI response OK', [
-                'input_count' => count($uncached),
-                'raw_response' => substr($content, 0, 500),
-            ]);
-
-            // Strip reasoning tags (<think>...</think>) from reasoning models
-            $content = preg_replace('/<think>.*?<\/think>/s', '', $content);
-            $content = trim($content);
-
-            // Strip code block markers (multiline safe)
-            $content = preg_replace('/^```(?:json)?\s*/m', '', $content);
-            $content = preg_replace('/\s*```$/m', '', $content);
-            $content = trim($content);
-
-            // Try to extract JSON array if wrapped in extra text
-            if (preg_match('/\[[\s\S]*\]/', $content, $matches)) {
-                $content = $matches[0];
-            }
-
-            $categories_result = json_decode($content, true);
-
-            if (!is_array($categories_result)) {
-                Log::warning('MiMo response not valid JSON', ['content' => $content]);
-                return $this->fallbackResults($uncached, $uncachedIdx, $cached);
-            }
-
-            // Map results back and cache
-            $results = $cached;
-            foreach ($uncachedIdx as $j => $origIdx) {
-                $cat = $categories_result[$j] ?? null;
-                // Validate category
-                if ($cat !== null && !in_array($cat, $this->validCategories)) {
-                    $cat = null; // AI hallucinated non-existent category
-                }
-                $results[$origIdx] = $cat;
-
-                // Cache for 24h
-                $cacheKey = 'mimo_cat_' . md5(strtolower(trim($uncached[$j])));
-                Cache::put($cacheKey, $cat, now()->addHours(24));
-            }
-
-            ksort($results);
-            return $results;
-
-        } catch (\Throwable $e) {
-            Log::error('MiMo AI classify error', ['error' => $e->getMessage()]);
-            return $this->fallbackResults($uncached, $uncachedIdx, $cached);
-        }
+        return array_map(fn($d) => $this->fallbackClassify((string) $d), $descriptions);
     }
 
     /**
-     * Helper: build fallback results from keyword classifier.
+     * Detect resource type: material, upah (labor), jasa (subkon), alat (equipment).
+     * Can optionally receive unit (satuan) for better accuracy.
      */
-    private function fallbackResults(array $uncached, array $uncachedIdx, array $cached): array
+    public function detectResourceType(string $description, ?string $unit = null): string
     {
-        $results = $cached;
-        foreach ($uncachedIdx as $j => $origIdx) {
-            $cat = $this->fallbackClassify($uncached[$j]);
-            $results[$origIdx] = $cat;
-            $cacheKey = 'mimo_cat_' . md5(strtolower(trim($uncached[$j])));
-            Cache::put($cacheKey, $cat, now()->addHours(24));
+        $desc = strtolower(trim($description));
+        $unit = strtolower(trim((string) $unit));
+
+        // ── Unit-based detection (highest priority, very reliable) ──────────
+        $laborUnits = ['oh', 'orang', 'org', 'orang/hari', 'oh/hari', 'hr', 'hk', 'hari kerja'];
+        $equipUnits = ['jam alat', 'jam', 'unit/hari', 'trip', 'ritase', 'rit'];
+        $serviceUnits = ['ls', 'lump sum', 'lumpsum', 'paket', 'pkt', 'set lengkap'];
+        $materialUnits = [
+            'kg', 'ton', 'm3', 'm2', 'm1', 'm\'', 'ltr', 'liter', 'sak', 'zak',
+            'btg', 'batang', 'lembar', 'lbr', 'bh', 'buah', 'pcs', 'dus', 'rol',
+            'galon', 'kaleng', 'drum', 'kubik', 'meter', 'lonjor', 'keping',
+        ];
+
+        if ($unit !== '') {
+            foreach ($laborUnits as $u) {
+                if ($unit === $u || str_contains($unit, $u)) {
+                    return self::TYPE_UPAH;
+                }
+            }
+            foreach ($equipUnits as $u) {
+                if ($unit === $u || str_contains($unit, $u)) {
+                    return self::TYPE_ALAT;
+                }
+            }
+            foreach ($serviceUnits as $u) {
+                if ($unit === $u || str_contains($unit, $u)) {
+                    return self::TYPE_JASA;
+                }
+            }
+            foreach ($materialUnits as $u) {
+                if ($unit === $u || str_contains($unit, $u)) {
+                    return self::TYPE_MATERIAL;
+                }
+            }
         }
-        ksort($results);
-        return $results;
+
+        // ── Description-based detection ────────────────────────────────────
+        $laborKeywords = [
+            'upah', 'mandor', 'tukang', 'pekerja', 'helper', 'kepala tukang',
+            'tenaga kerja', 'buruh', 'operator', 'sopir', 'supir', 'satpam',
+            'penjaga', 'kebersihan', 'cleaning service', 'security',
+        ];
+        $equipKeywords = [
+            'sewa', 'rental', 'excavator', 'bulldozer', 'crane', 'dump truck',
+            'mixer truck', 'vibrator', 'stamper', 'genset', 'pompa beton',
+            'concrete pump', 'scaffolding', 'bekisting sistem', 'alat berat',
+            'theodolit', 'waterpass', 'jack hammer', 'compressor',
+            'truck', 'truk', 'forklift', 'backhoe', 'wheel loader',
+        ];
+        $serviceKeywords = [
+            'borongan', 'subkon', 'sub kontraktor', 'jasa', 'kontrak',
+            'paket pekerjaan', 'lump sum', 'turnkey',
+            'pemasangan', 'instalasi', 'pengerjaan', 'pekerjaan',
+        ];
+
+        // Score-based: labor and equipment keywords are checked with priority
+        $laborScore = 0;
+        foreach ($laborKeywords as $kw) {
+            if (str_contains($desc, $kw)) {
+                $laborScore += strlen($kw);
+            }
+        }
+
+        $equipScore = 0;
+        foreach ($equipKeywords as $kw) {
+            if (str_contains($desc, $kw)) {
+                $equipScore += strlen($kw);
+            }
+        }
+
+        $serviceScore = 0;
+        foreach ($serviceKeywords as $kw) {
+            if (str_contains($desc, $kw)) {
+                $serviceScore += strlen($kw);
+            }
+        }
+
+        $maxScore = max($laborScore, $equipScore, $serviceScore);
+
+        if ($maxScore > 0) {
+            if ($laborScore === $maxScore) return self::TYPE_UPAH;
+            if ($equipScore === $maxScore) return self::TYPE_ALAT;
+            return self::TYPE_JASA;
+        }
+
+        // Default: assume material if nothing else matches
+        return self::TYPE_MATERIAL;
     }
 
     /**
-     * Keyword-based fallback classifier (tanpa API).
-     * Dipakai saat AI tidak dikonfigurasi atau error.
+     * Score-based keyword classifier for work category.
+     *
+     * Improvements over the old first-match approach:
+     * 1. Scores ALL categories and picks the highest — no more "cat besi" → Cat bug
+     * 2. Longer keyword matches score higher (compound phrases beat single words)
+     * 3. 200+ keywords covering real Indonesian construction RAB terminology
      */
     public function fallbackClassify(string $description): ?string
     {
         $desc = strtolower(trim($description));
+        if ($desc === '') {
+            return null;
+        }
 
-        $rules = [
-            'Pekerjaan Persiapan' => ['mobilisasi', 'barak', 'pagar', 'plang', 'papan nama', 'direksi keet', 'persiapan', 'pembersihan', 'survey', 'pengukuran', 'emarking', 'angkut', 'truk', 'transport', 'jasa angkut', 'dump truck'],
-            'Pekerjaan Tanah'     => ['galian', 'timbunan', 'urug', 'tanah', 'leveling', 'cut and fill', 'landfill', 'padatkan'],
-            'Pekerjaan Pondasi'   => ['pondasi', 'pile cap', 'tiang pancang', 'bored pile', 'footing', 'straat', 'pilec', 'spun pile'],
-            'Pekerjaan Beton'     => ['beton', 'concrete', 'cor', 'pengecoran', 'ready mix', 'mutu k', 'agregat', 'semen', 'mortar', 'grouting'],
-            'Pekerjaan Batu'      => ['batu', 'kali', 'dinding batu', 'bronjong', 'gabion'],
-            'Pekerjaan Besi'      => ['besi', 'tulangan', 'wire mesh', 'baja', 'wf', 'h-beam', 'i-beam', 'angle', 'kanal'],
-            'Pekerjaan Kayu'      => ['kayu', 'papan', 'renovasi kayu', 'kuda-kuda', 'rangka atap kayu', 'usuk', 'reng'],
-            'Pekerjaan Atap'      => ['atap', 'genteng', 'spandek', 'bocor', 'talang', 'nok', 'lisplank'],
-            'Pekerjaan Plafon'    => ['plafon', 'ceiling', 'gypsum', 'hollow', 'drop ceiling'],
-            'Pekerjaan Lantai'    => ['lantai', 'keramik', 'granit', 'marmer', 'tegel', 'vinyl', 'flooring', 'paving', 'ubin'],
-            'Pekerjaan Dinding'   => ['dinding', 'bata', 'hebel', 'batako', 'partisi', 'dinding ringan', 'dinding partisi'],
-            'Pekerjaan Cat'       => ['cat', 'pengecatan', 'wallpaper', 'plamir', 'cat tembok', 'meni'],
-            'Pekerjaan Sanitari'  => ['sanitari', 'kloset', 'toilet', 'wastafel', 'urinoir', 'pipa', 'kran', 'sumur', 'septic tank', 'grease trap'],
-            'Pekerjaan Mekanikal' => ['mekanikal', 'ac', 'exhaust', 'fan', 'ducting', 'chiller', 'pump', 'pompa', 'blower', 'kompresor'],
-            'Pekerjaan Elektrikal'=> ['elektrikal', 'listrik', 'kabel', 'lampu', 'panel', 'mdp', 'sdcp', 'stop kontak', 'saklar', 'mcb', 'mcbo', 'grounding', 'jitcom', 'cctv', 'titik'],
-            'Pekerjaan Bongkar'   => ['bongkar', 'demolition', 'roboh', 'dismantle', 'pembongkaran'],
-            'Pekerjaan Landscape' => ['landscape', 'taman', 'rumput', 'tanaman', 'pohon', 'siraman', 'sprinkle', 'pagar tanaman'],
-            'Pekerjaan Mebelair'  => ['meja', 'kursi', 'lemari', 'mebel', 'furniture', 'pintu', 'jendela', 'kusen', 'rak', 'kabinet', 'wardrobe'],
+        $categories = [
+            'Pekerjaan Persiapan' => [
+                'pembersihan', 'clearing', 'pemotongan pohon', 'pemagaran', 'hoarding',
+                'mobilisasi', 'demobilisasi', 'papan nama', 'barak', 'gudang',
+                'direksi keet', 'persiapan', 'survey', 'pengukuran', 'emarking',
+                'plang proyek', 'keamanan proyek', 'pagar proyek', 'p3k',
+                'scaffolding', 'steger', 'andang', 'pengadaan',
+            ],
+            'Pekerjaan Tanah' => [
+                'galian', 'urugan', 'tanah', 'cut and fill', 'timbunan', 'pemadatan',
+                'tanah urug', 'sirtu', 'screeding', 'grading', 'excavation',
+                'gali tanah', 'urug tanah', 'tanah merah', 'tanah biasa', 'pasir urug',
+                'pembuangan tanah', 'boring', 'bor pile', 'leveling', 'landfill',
+                'subgrade', 'subbase', 'base course',
+                'excavator', 'backhoe', 'bulldozer', 'wheel loader',
+            ],
+            'Pekerjaan Pondasi' => [
+                'pondasi', 'footplate', 'foot plat', 'bored pile', 'tiang pancang',
+                'sumuran', 'straus', 'pile cap', 'sloof', 'balok sloof',
+                'anak tiang', 'piles', 'spun pile', 'mini pile', 'cerucuk',
+                'strauss pile', 'cakar ayam', 'pilecap',
+            ],
+            'Pekerjaan Beton' => [
+                'beton', 'cor', 'readymix', 'ready mix', 'mutu beton', 'bekisting',
+                'begisting', 'balok', 'kolom', 'plat lantai', 'ring balk',
+                'ringbalok', 'kolom praktis', 'tangga beton', 'dak beton',
+                'struktur beton', 'adukan beton', 'screed', 'pengecoran',
+                'mutu k-', 'mutu k ', 'concrete', 'agregat', 'semen', 'mortar',
+                'grouting', 'precast', 'u-ditch', 'box culvert',
+            ],
+            'Pekerjaan Batu' => [
+                'batu bata', 'pasangan batu', 'bata ringan', 'bata merah', 'batako',
+                'hebel', 'bata expose', 'batu alam', 'batu kali', 'batu pondasi',
+                'plesteran', 'acian', 'bronjong', 'gabion', 'batu belah',
+                'batu gunung', 'andesit',
+            ],
+            'Pekerjaan Besi' => [
+                'besi beton', 'besi ulir', 'besi polos', 'besi siku',
+                'besi', 'steel', 'baja', 'reinforcement', 'tulangan', 'sengkang',
+                'begel', 'wiremesh', 'wire mesh', 'dowel', 'anchor bolt',
+                'hollow', 'kanal', 'cnp', 'wf', 'h-beam', 'i-beam',
+                'plat besi', 'plat baja', 'rangka baja', 'struktur baja',
+                'baja ringan', 'railing', 'handrail', 'pipa besi',
+                'angle bar', 'flat bar', 'round bar',
+            ],
+            'Pekerjaan Kayu' => [
+                'kayu', 'wood', 'papan kayu', 'multipleks', 'triplek', 'plywood',
+                'kasau', 'reng kayu', 'balok kayu', 'kosen', 'kusen',
+                'daun pintu', 'daun jendela', 'lambersering', 'parquet', 'parket',
+                'lantai kayu', 'decking', 'usuk', 'kuda-kuda', 'rangka atap kayu',
+            ],
+            'Pekerjaan Atap' => [
+                'atap', 'genteng', 'seng', 'spandek', 'trimdek', 'roofing',
+                'atap seng', 'atap beton', 'atap metal', 'atap zincalume',
+                'atap upvc', 'atap polycarbonate', 'talang', 'nok', 'lisplank',
+                'karpus', 'atap sirap', 'atap rumbia', 'bubungan',
+            ],
+            'Pekerjaan Plafon' => [
+                'plafon', 'ceiling', 'gypsum', 'gipsum', 'rangka plafon',
+                'pvc plafon', 'akustik', 'acoustic', 'fiber ceiling',
+                'kalsiboard', 'grc board', 'rangka hollow plafon', 'drop ceiling',
+            ],
+            'Pekerjaan Lantai' => [
+                'keramik', 'granit', 'marmer', 'ubin', 'lantai', 'flooring',
+                'homogeneous', 'vinyl', 'epoxy lantai', 'penutup lantai',
+                'nat keramik', 'skirting', 'plint', 'mozaik', 'teraso',
+                'paving', 'kanstin', 'conblock', 'tegel',
+            ],
+            'Pekerjaan Dinding' => [
+                'dinding', 'tembok', 'wall', 'partisi dinding', 'cladding',
+                'dinding kaca', 'curtain wall', 'facades', 'panel dinding',
+                'acp', 'aluminium composite', 'kaca', 'glass block',
+            ],
+            'Pekerjaan Cat' => [
+                'cat tembok', 'cat minyak', 'cat besi', 'cat kayu', 'cat dinding',
+                'pengecatan', 'mengecat', 'dempul', 'plamir', 'plamur',
+                'wallpaper', 'wallcovering', 'anti bocor', 'waterproofing',
+                'melamic', 'vernis', 'politur', 'coating', 'finishing cat',
+            ],
+            'Pekerjaan Sanitari' => [
+                'sanitari', 'sanitary', 'closet', 'toilet', 'kloset', 'urinoir',
+                'wastafel', 'shower', 'bak mandi', 'kran', 'faucet',
+                'saluran air', 'pipa air', 'plumbing', 'drainase',
+                'floor drain', 'grease trap', 'septictank', 'septic tank',
+                'sumur resapan', 'toren', 'tangki air', 'pompa air',
+            ],
+            'Pekerjaan Mekanikal' => [
+                'mekanikal', 'air conditioning', 'hvac', 'ahu', 'fcu',
+                'kompresor', 'chiller', 'cooling tower', 'ventilasi',
+                'exhaust fan', 'ducting', 'instalasi gas', 'fire hydrant',
+                'sprinkler', 'pompa kebakaran', 'fm 200', 'alat pemadam',
+                'lift', 'elevator', 'escalator', 'blower',
+                'ac split', 'ac cassette', 'ac central', 'ac standing',
+            ],
+            'Pekerjaan Elektrikal' => [
+                'elektrikal', 'listrik', 'kabel', 'instalasi listrik', 'mcb',
+                'panel listrik', 'lampu', 'lighting', 'led', 'saklar',
+                'stop kontak', 'kotak saklar', 'sekring', 'kapasitor',
+                'transformator', 'trafo', 'ats', 'kapasitor bank',
+                'grounding', 'penangkal petir', 'lightning protection',
+                'cctv', 'fire alarm', 'bell', 'intercom', 'sound system',
+                'data', 'network', 'fiber optic', 'structured cabling',
+                'titik lampu', 'titik stop kontak',
+            ],
+            'Pekerjaan Bongkar' => [
+                'bongkar', 'demolition', 'pembongkaran', 'peruntuhan',
+                'dismantle', 'robohkan',
+            ],
+            'Pekerjaan Landscape' => [
+                'landscape', 'taman', 'tanaman', 'rumput', 'pohon',
+                'perkerasan', 'jalan taman', 'pot tanaman', 'irrigasi taman',
+                'gazebo', 'pergola', 'carport', 'pagar taman', 'gerbang',
+                'saluran taman', 'pagar besi taman',
+            ],
+            'Pekerjaan Mebelair' => [
+                'mebelair', 'meubel', 'furniture', 'lemari', 'meja', 'kursi',
+                'rak', 'kitchen set', 'backdrop', 'counter', 'display',
+                'kabinet', 'wardrobe', 'credenza', 'nakas', 'buffet',
+            ],
         ];
 
-        foreach ($rules as $category => $keywords) {
+        // ── Score every category: longer keyword match = higher relevance ──
+        $scores = [];
+        foreach ($categories as $catName => $keywords) {
+            $score = 0;
             foreach ($keywords as $kw) {
                 if (str_contains($desc, $kw)) {
-                    return $category;
+                    $score += strlen($kw);
                 }
+            }
+            if ($score > 0) {
+                $scores[$catName] = $score;
             }
         }
 
-        return null; // Tidak cocok keyword manapun
+        if (empty($scores)) {
+            return null;
+        }
+
+        // Highest total score wins
+        arsort($scores);
+
+        return array_key_first($scores);
     }
 }

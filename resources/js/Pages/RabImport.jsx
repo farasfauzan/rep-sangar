@@ -34,9 +34,11 @@ export default function RabImport() {
     const loadProjects = async () => {
         try {
             const response = await api.get('/api/rab/import/projects');
-            setProjectsList(response.data);
+            const data = Array.isArray(response.data) ? response.data : (response.data?.data || []);
+            setProjectsList(data);
         } catch (err) {
             console.error('Failed to load projects', err);
+            setProjectsList([]);
         }
     };
 
@@ -280,7 +282,7 @@ export default function RabImport() {
                                         className="mt-1 block w-full rounded border-gray-300"
                                     >
                                         <option value="">-- Pilih Project --</option>
-                                        {projectsList.map((p) => (
+                                        {(projectsList || []).map((p) => (
                                             <option key={p.id} value={p.id}>
                                                 {p.project_name} ({p.project_code})
                                             </option>
@@ -351,16 +353,24 @@ export default function RabImport() {
                                     </thead>
                                     <tbody className="divide-y divide-gray-200 bg-white">
                                         {previewData.rows.map((row, i) => (
-                                            <tr key={i}>
-                                                <td className="px-4 py-2 text-sm text-gray-500">{i + 1}</td>
-                                                <td className="px-4 py-2 text-sm text-gray-600">{row.code || '-'}</td>
-                                                <td className="px-4 py-2 text-sm font-medium text-gray-900 max-w-xs truncate">{row.description}</td>
-                                                <td className="px-4 py-2 text-sm text-gray-600">{row.unit}</td>
-                                                <td className="px-4 py-2 text-right text-sm text-gray-600">{Number(row.qty || 0).toLocaleString('id-ID')}</td>
-                                                <td className="px-4 py-2 text-right text-sm text-gray-600">{money(row.price)}</td>
-                                                <td className="px-4 py-2 text-right text-sm text-gray-600">{money(row.total)}</td>
-                                                <td className="px-4 py-2 text-sm text-gray-500">{row.category || '-'}</td>
-                                            </tr>
+                                            row.is_section ? (
+                                                <tr key={i} className="bg-indigo-50 border-t-2 border-indigo-300">
+                                                    <td colSpan={8} className="px-4 py-3 text-sm font-bold text-indigo-900">
+                                                        {row.section_code ? `${row.section_code}. ` : ''}{row.description}
+                                                    </td>
+                                                </tr>
+                                            ) : (
+                                                <tr key={i}>
+                                                    <td className="px-4 py-2 text-sm text-gray-500">{i + 1}</td>
+                                                    <td className="px-4 py-2 text-sm text-gray-600">{row.code || '-'}</td>
+                                                    <td className="px-4 py-2 text-sm font-medium text-gray-900 max-w-xs truncate">{row.description}</td>
+                                                    <td className="px-4 py-2 text-sm text-gray-600">{row.unit}</td>
+                                                    <td className="px-4 py-2 text-right text-sm text-gray-600">{Number(row.qty || 0).toLocaleString('id-ID')}</td>
+                                                    <td className="px-4 py-2 text-right text-sm text-gray-600">{money(row.price)}</td>
+                                                    <td className="px-4 py-2 text-right text-sm text-gray-600">{money(row.total)}</td>
+                                                    <td className="px-4 py-2 text-sm text-gray-500">{row.category || '-'}</td>
+                                                </tr>
+                                            )
                                         ))}
                                     </tbody>
                                 </table>

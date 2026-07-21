@@ -5,174 +5,319 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Cetak PO - {{ $po->po_number }}</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 12px; color: #1a1a1a; line-height: 1.5; }
-        .container { max-width: 210mm; margin: 0 auto; padding: 20mm; }
-        .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1a1a1a; padding-bottom: 12px; margin-bottom: 20px; }
-        .header-left h1 { font-size: 18px; font-weight: 700; }
-        .header-left p { font-size: 11px; color: #555; }
-        .header-right h2 { font-size: 16px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
-        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
-        .info-table { width: 100%; font-size: 12px; }
-        .info-table td { padding: 3px 0; vertical-align: top; }
-        .info-table .label { color: #666; width: 130px; }
-        .info-table .value { font-weight: 600; }
-        table.items { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-        table.items th { background: #1a1a1a; color: #fff; padding: 8px 10px; text-align: left; font-size: 11px; text-transform: uppercase; }
-        table.items th.right, table.items td.right { text-align: right; }
-        table.items td { border: 1px solid #ddd; padding: 6px 10px; font-size: 12px; }
-        table.items tr:nth-child(even) { background: #f9f9f9; }
-        .totals { display: flex; justify-content: flex-end; margin-bottom: 20px; }
-        .totals-box { width: 260px; }
-        .totals-box .row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 12px; }
-        .totals-box .row.total { border-top: 2px solid #1a1a1a; padding-top: 8px; margin-top: 4px; font-weight: 700; font-size: 14px; }
-        .notes { margin-bottom: 20px; padding: 10px; background: #f5f5f5; border-radius: 4px; font-size: 12px; }
-        .notes h3 { font-size: 12px; font-weight: 700; margin-bottom: 4px; }
-        .signatures { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 40px; margin-top: 40px; padding-top: 16px; border-top: 1px solid #ccc; }
-        .signatures .col { text-align: center; }
-        .signatures .line { height: 60px; border-bottom: 1px solid #999; margin: 0 20px 8px; }
-        .signatures .name { font-size: 11px; color: #555; }
-        .footer { margin-top: 30px; padding-top: 10px; border-top: 1px solid #ddd; font-size: 10px; color: #999; text-align: center; }
+        @page { size: A4 portrait; margin: 12mm 13mm 16mm; }
+        * { box-sizing: border-box; }
+        html, body { margin: 0; padding: 0; background: #fff; color: #111; }
+        body {
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 11px;
+            line-height: 1.3;
+        }
+        .toolbar {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin: 0 0 14px;
+        }
+        .toolbar button {
+            border: 0;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            padding: 7px 16px;
+        }
+        .toolbar .print { background: #1d4ed8; color: #fff; }
+        .toolbar .back { background: #e5e7eb; color: #111; }
+        .sheet { width: 100%; }
+        .letterhead {
+            margin-bottom: 6px;
+            text-align: center;
+        }
+        .letterhead img {
+            display: block;
+            height: auto;
+            margin: 0 auto 2px;
+            max-width: 185px;
+        }
+        .letterhead p {
+            color: #2875b8;
+            font-size: 9px;
+            line-height: 1.1;
+            margin: 1px 0;
+        }
+        .recipient {
+            line-height: 1.35;
+            margin-top: 7px;
+        }
+        .recipient p { margin: 0; }
+        .recipient .name { font-weight: 700; }
+        .document-title {
+            border: 1px solid #222;
+            font-size: 20px;
+            font-weight: 700;
+            letter-spacing: .2px;
+            margin: 11px 0 9px;
+            padding: 4px 0;
+            text-align: center;
+        }
+        .meta {
+            border-collapse: collapse;
+            margin-bottom: 10px;
+            width: 100%;
+        }
+        .meta td {
+            padding: 1px 3px;
+            vertical-align: top;
+        }
+        .meta .label { white-space: nowrap; width: 78px; }
+        .meta .colon { text-align: center; width: 14px; }
+        .intro {
+            line-height: 1.35;
+            margin: 8px 0 9px;
+        }
+        .items {
+            border-collapse: collapse;
+            table-layout: fixed;
+            width: 100%;
+        }
+        .items thead { display: table-header-group; }
+        .items tr { page-break-inside: avoid; }
+        .items .total-row { page-break-inside: avoid; }
+        .items th {
+            background: #d9d9d9;
+            border: 1px solid #222;
+            font-weight: 700;
+            padding: 4px 3px;
+            text-align: center;
+        }
+        .items td {
+            border: 1px solid #444;
+            padding: 3px 4px;
+            vertical-align: top;
+        }
+        .items .no { text-align: center; width: 5%; }
+        .items .description { text-align: left; width: 39%; }
+        .items .quantity { text-align: center; width: 10%; }
+        .items .unit { text-align: center; width: 10%; }
+        .items .duration { text-align: center; width: 10%; }
+        .items .money {
+            text-align: right;
+            white-space: nowrap;
+            width: 13%;
+        }
+        .items .group-row td { font-weight: 700; }
+        .items .note-row td { font-style: italic; }
+        .items .note-row .description { padding-left: 12px; }
+        .total-row td {
+            border-bottom: 2px solid #222;
+            border-top: 2px solid #222;
+            font-weight: 700;
+            padding-bottom: 5px;
+            padding-top: 5px;
+        }
+        .total-row .total-label { text-align: center; }
+        .total-row .money { text-align: right; }
+        .post-table { page-break-inside: avoid; }
+        .notes {
+            margin-top: 8px;
+        }
+        .notes-title { font-weight: 700; }
+        .notes p {
+            margin: 2px 0;
+            padding-left: 12px;
+        }
+        .notes .emphasis {
+            color: #d00000;
+            font-weight: 700;
+        }
+        .tax {
+            margin-top: 9px;
+        }
+        .tax-title { font-weight: 700; }
+        .tax table {
+            border-collapse: collapse;
+            margin-top: 2px;
+        }
+        .tax td { padding: 1px 4px 1px 0; vertical-align: top; }
+        .tax .label { font-weight: 700; width: 56px; }
+        .closing { margin-top: 14px; }
+        .signature {
+            margin: 27px 22px 0 auto;
+            text-align: center;
+            width: 220px;
+        }
+        .signature .space { height: 54px; }
+        .signature .company,
+        .signature .name { font-weight: 700; }
+        .signature p { margin: 2px 0; }
+        .page-footer {
+            color: #666;
+            display: none;
+            font-size: 8px;
+            text-align: center;
+        }
         @media print {
+            .toolbar { display: none !important; }
             body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-            .container { padding: 0; }
-            .no-print { display: none !important; }
-            @page { size: A4; margin: 15mm; }
+            .page-footer {
+                display: block;
+                position: fixed;
+                bottom: -10mm;
+                left: 0;
+                right: 0;
+            }
+            .page-footer::after {
+                content: "Halaman " counter(page) " dari " counter(pages);
+            }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="no-print" style="text-align: right; margin-bottom: 16px;">
-            <button onclick="window.print()" style="padding: 8px 20px; background: #1d4ed8; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Cetak</button>
-            <button onclick="window.history.back()" style="padding: 8px 20px; background: #e5e7eb; color: #333; border: none; border-radius: 6px; cursor: pointer; font-size: 14px;">← Kembali</button>
+    @php
+        $formatQty = static function ($value): string {
+            $formatted = number_format((float) $value, 2, ',', '.');
+            return rtrim(rtrim($formatted, '0'), ',');
+        };
+        $formatMoney = static fn ($value): string => 'Rp ' . number_format((float) $value, 2, ',', '.');
+        $logoPath = public_path('images/logo-scs.png');
+        $logoSrc = file_exists($logoPath)
+            ? 'data:image/png;base64,' . base64_encode((string) file_get_contents($logoPath))
+            : asset('images/logo-scs.png');
+        $hasDuration = $po->items->contains(fn ($item) => (bool) (data_get($item, 'durasi') ?: data_get($item, 'duration')));
+        $noteLines = $po->catatan
+            ? preg_split('/\r\n|\r|\n/', (string) $po->catatan, -1, PREG_SPLIT_NO_EMPTY)
+            : [];
+    @endphp
+
+        @unless($isPdf ?? false)
+            <div class="toolbar">
+            <button class="print" type="button" onclick="window.print()">Cetak</button>
+            <button class="back" type="button" onclick="window.history.back()">Kembali</button>
+        </div>
+        @endunless
+
+        <div class="page-footer" aria-hidden="true"></div>
+
+    <main class="sheet">
+        <div class="letterhead">
+            <img src="{{ $logoSrc }}" alt="PT. Sinar Cerah Sempurna">
+            <p>Karangrejo Barat No. 9 RT 002 RW 002</p>
+            <p>Tinjomoyo, Banyumanik, Semarang</p>
+            <p>NPWP: 002.652.984.2-331.000</p>
         </div>
 
-        <div class="header">
-            <div class="header-left">
-                <h1>PT. Nama Perusahaan</h1>
-                <p>Jl. Contoh No. 123, Kota, Provinsi</p>
-                <p>Telp: (021) 123-4567 | Email: info@perusahaan.com</p>
-            </div>
-            <div class="header-right">
-                <h2>Purchase Order</h2>
-                <p style="font-size: 11px; color: #666;">{{ $po->po_level === 'SUPPLIER' ? 'Supplier' : 'Project' }}</p>
-            </div>
+        <div class="recipient">
+            <p>Kepada Yth.</p>
+            <p class="name">{{ $po->supplier_name ?: '-' }}</p>
+            @if($po->supplier_address)<p>{{ $po->supplier_address }}</p>@endif
+            @if($po->supplier_phone || $po->supplier_contact_person)
+                <p>
+                    @if($po->supplier_phone)Telp. {{ $po->supplier_phone }}@endif
+                    @if($po->supplier_phone && $po->supplier_contact_person) &nbsp; @endif
+                    @if($po->supplier_contact_person)Up. {{ $po->supplier_contact_person }}@endif
+                </p>
+            @endif
         </div>
 
-        <div class="info-grid">
-            <table class="info-table">
-                <tr><td class="label">No. PO</td><td class="value">: {{ $po->po_number }}</td></tr>
-                <tr><td class="label">Tanggal</td><td class="value">: {{ \Carbon\Carbon::parse($po->date)->translatedFormat('d F Y') }}</td></tr>
-                <tr><td class="label">Tipe</td><td class="value">: {{ str_replace('_', ' ', $po->po_type ?? '-') }}</td></tr>
-                @if($po->addendum_number)
-                <tr><td class="label">No. Addendum</td><td class="value">: {{ $po->addendum_number }}</td></tr>
-                @endif
-                <tr><td class="label">Status</td><td class="value">: {{ str_replace('_', ' ', $po->status) }}</td></tr>
-            </table>
-            <table class="info-table">
-                <tr><td class="label">Supplier</td><td class="value">: {{ $po->supplier_name }}</td></tr>
-                @if($po->supplier_address)
-                <tr><td class="label">Alamat Supplier</td><td class="value">: {{ $po->supplier_address }}</td></tr>
-                @endif
-                @if($po->supplier_phone)
-                <tr><td class="label">Telp Supplier</td><td class="value">: {{ $po->supplier_phone }}</td></tr>
-                @endif
-                @if($po->supplier_contact_person)
-                <tr><td class="label">Contact Person</td><td class="value">: {{ $po->supplier_contact_person }}</td></tr>
-                @endif
-                <tr><td class="label">Proyek</td><td class="value">: {{ $po->project?->project_name ?? '-' }}</td></tr>
-                @if($po->project_location)
-                <tr><td class="label">Lokasi Proyek</td><td class="value">: {{ $po->project_location }}</td></tr>
-                @endif
-            </table>
+        <div class="document-title">
+            {{ $po->po_type === 'REVISI' ? 'PURCHASE ORDER REVISI' : ($po->po_type === 'ADDENDUM' ? 'PURCHASE ORDER (ADDENDUM ' . ($po->addendum_number ?: 'I') . ')' : 'PURCHASE ORDER') }}
+        </div>
+
+        <table class="meta">
+            <tr><td class="label">Nomor</td><td class="colon">:</td><td>{{ $po->po_number }}</td></tr>
+            <tr><td class="label">Tanggal</td><td class="colon">:</td><td>{{ \Carbon\Carbon::parse($po->date)->locale('id')->translatedFormat('d F Y') }}</td></tr>
+            <tr><td class="label">Proyek</td><td class="colon">:</td><td>{{ $po->project?->project_name ?: '-' }}</td></tr>
+            <tr><td class="label">Lokasi</td><td class="colon">:</td><td>{{ $po->project_location ?: ($po->project?->location ?: '-') }}</td></tr>
+            <tr><td class="label">Contact Person</td><td class="colon">:</td><td>{{ $po->supplier_contact_person ?: '-' }}</td></tr>
+        </table>
+
+        <div class="intro">
+            <p>Dengan hormat,</p>
+            <p>Bersama ini kami mohon diadakan material pada proyek tersebut diatas dengan data sebagai berikut :</p>
         </div>
 
         <table class="items">
+            <colgroup>
+                <col class="no">
+                <col class="description">
+                <col class="quantity">
+                <col class="unit">
+                @if($hasDuration)<col class="duration">@endif
+                <col class="money">
+                <col class="money">
+            </colgroup>
             <thead>
                 <tr>
-                    <th style="width:40px">No</th>
-                    <th>Nama Item</th>
-                    <th class="right" style="width:80px">Qty</th>
-                    <th class="right" style="width:140px">Harga Satuan</th>
-                    <th class="right" style="width:140px">Total</th>
+                    <th>No</th>
+                    <th>Uraian</th>
+                    <th>Volume</th>
+                    <th>Satuan</th>
+                    @if($hasDuration)<th>Durasi</th>@endif
+                    <th>Harga Satuan</th>
+                    <th>Jumlah</th>
                 </tr>
             </thead>
             <tbody>
                 @forelse($po->items as $i => $item)
-                <tr>
-                    <td>{{ $i + 1 }}</td>
-                    <td>{{ $item->item_name }}</td>
-                    <td class="right">{{ number_format($item->qty, 2, ',', '.') }}</td>
-                    <td class="right">Rp {{ number_format($item->unit_price, 0, ',', '.') }}</td>
-                    <td class="right">Rp {{ number_format($item->total_price, 0, ',', '.') }}</td>
-                </tr>
+                    @php
+                        $itemName = trim((string) ($item->item_name ?: ($item->rabBudget?->description ?: '-')));
+                        $isNote = preg_match('/^(note\s*:|[-*]\s)/i', $itemName) === 1;
+                        $duration = data_get($item, 'durasi') ?: data_get($item, 'duration');
+                        $unit = $item->rabBudget?->unit ?: data_get($item, 'unit');
+                    @endphp
+                    <tr class="{{ $isNote ? 'note-row' : '' }}">
+                        <td class="no">{{ $isNote ? '' : $i + 1 }}</td>
+                        <td class="description">{{ $itemName }}</td>
+                        <td class="quantity">{{ $isNote ? '' : $formatQty($item->qty) }}</td>
+                        <td class="unit">{{ $isNote ? '' : ($unit ?: '-') }}</td>
+                        @if($hasDuration)<td class="duration">{{ $isNote ? '' : ($duration ?: '') }}</td>@endif
+                        <td class="money">{{ $isNote ? '' : $formatMoney($item->unit_price) }}</td>
+                        <td class="money">{{ $isNote ? '' : $formatMoney($item->total_price) }}</td>
+                    </tr>
                 @empty
-                <tr><td colspan="5" style="text-align:center; color:#999; padding:16px;">Tidak ada item.</td></tr>
+                    <tr><td class="description" colspan="{{ $hasDuration ? 7 : 6 }}">Tidak ada item.</td></tr>
                 @endforelse
+                <tr class="total-row">
+                    <td colspan="{{ $hasDuration ? 6 : 5 }}" class="total-label">TOTAL</td>
+                    <td class="money">{{ $formatMoney($po->total_amount ?: $po->subtotal) }}</td>
+                </tr>
             </tbody>
         </table>
 
-        <div class="totals">
-            <div class="totals-box">
-                <div class="row"><span>Subtotal:</span><span>Rp {{ number_format($po->subtotal, 0, ',', '.') }}</span></div>
-                @if($po->discount > 0)
-                <div class="row" style="color:#dc2626;"><span>Diskon:</span><span>- Rp {{ number_format($po->discount, 0, ',', '.') }}</span></div>
-                @endif
-                @if($po->include_ppn)
-                <div class="row"><span>PPN 11%:</span><span>Rp {{ number_format($po->tax_amount, 0, ',', '.') }}</span></div>
-                @endif
-                <div class="row total"><span>Grand Total:</span><span>Rp {{ number_format($po->total_amount, 0, ',', '.') }}</span></div>
+        <div class="post-table">
+            @if(count($noteLines) || $po->payment_terms)
+                <div class="notes">
+                    <span class="notes-title">Catatan :</span>
+                    @foreach($noteLines as $line)
+                        <p class="{{ preg_match('/invoice|pph|pajak|materai/i', $line) ? 'emphasis' : '' }}">{{ $line }}</p>
+                    @endforeach
+                    @if($po->payment_terms)
+                        <p>Sistem Pembayaran: {{ $po->payment_terms }}</p>
+                    @endif
+                </div>
+            @endif
+
+            @if($po->faktur_pajak_nama || $po->faktur_pajak_npwp || $po->faktur_pajak_alamat)
+                <div class="tax">
+                    <div class="tax-title">** Untuk Faktur Pajak</div>
+                    <table>
+                        @if($po->faktur_pajak_nama)<tr><td class="label">Nama</td><td>:</td><td>{{ $po->faktur_pajak_nama }}</td></tr>@endif
+                        @if($po->faktur_pajak_npwp)<tr><td class="label">NPWP</td><td>:</td><td>{{ $po->faktur_pajak_npwp }}</td></tr>@endif
+                        @if($po->faktur_pajak_alamat)<tr><td class="label">Alamat</td><td>:</td><td>{{ $po->faktur_pajak_alamat }}</td></tr>@endif
+                    </table>
+                </div>
+            @endif
+
+            <p class="closing">Demikian surat dari kami, atas perhatian dan kerjasamanya kami ucapkan terima kasih.</p>
+
+            <div class="signature">
+                <p>Hormat kami,</p>
+                <p class="company">PT. SINAR CERAH SEMPURNA</p>
+                <div class="space"></div>
+                <p class="name">NARWAN PRATANTA, ST</p>
+                <p>Manager Komersial</p>
             </div>
         </div>
-
-        @if($po->payment_terms)
-        <div class="notes">
-            <h3>Syarat Pembayaran</h3>
-            <p>{{ $po->payment_terms }}</p>
-        </div>
-        @endif
-
-        @if($po->catatan)
-        <div class="notes">
-            <h3>Catatan</h3>
-            <p>{{ $po->catatan }}</p>
-        </div>
-        @endif
-
-        @if($po->faktur_pajak_nama)
-        <div class="notes">
-            <h3>Faktur Pajak</h3>
-            <p>Nama: {{ $po->faktur_pajak_nama }}<br>
-            @if($po->faktur_pajak_npwp)NPWP: {{ $po->faktur_pajak_npwp }}<br>@endif
-            @if($po->faktur_pajak_alamat)Alamat: {{ $po->faktur_pajak_alamat }}</p>@endif
-        </div>
-        @endif
-
-        <div class="signatures">
-            <div class="col">
-                <p style="font-size: 12px; color: #666; margin-bottom: 4px;">Disiapkan oleh</p>
-                <div class="line"></div>
-                <p class="name">(___________________)</p>
-                <p style="font-size: 10px; color: #999;">Nama & Tanda Tangan</p>
-            </div>
-            <div class="col">
-                <p style="font-size: 12px; color: #666; margin-bottom: 4px;">Diperiksa oleh</p>
-                <div class="line"></div>
-                <p class="name">(___________________)</p>
-                <p style="font-size: 10px; color: #999;">Nama & Tanda Tangan</p>
-            </div>
-            <div class="col">
-                <p style="font-size: 12px; color: #666; margin-bottom: 4px;">Disetujui oleh</p>
-                <div class="line"></div>
-                <p class="name">(___________________)</p>
-                <p style="font-size: 10px; color: #999;">Nama & Tanda Tangan</p>
-            </div>
-        </div>
-
-        <div class="footer">
-            Dicetak pada {{ now()->translatedFormat('d F Y, H:i') }}
-        </div>
-    </div>
+    </main>
 </body>
 </html>

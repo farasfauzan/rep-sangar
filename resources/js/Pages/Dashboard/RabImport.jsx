@@ -68,12 +68,19 @@ function ExcelSheetGrid({ rows, rawData, sheet, savingRows, updateRow, saveRow, 
     }, [sheet, rawData]);
 
     const columns = rawData?.columns?.length ? rawData.columns : ['A', 'B', 'C', 'D', 'E', 'F'];
-    const previewRows = rawData?.rows?.length
-        ? rawData.rows
-        : rows.map((row) => ({
+    const previewRows = useMemo(() => {
+        if (!rawData?.rows) {
+            return rows.map((row) => ({
+                row_number: row.row_number,
+                values: [row.code_item, row.description, row.unit, row.volume, row.unit_price, row.total_price],
+            }));
+        }
+        const rawArray = Array.isArray(rawData.rows) ? rawData.rows : Object.values(rawData.rows);
+        return rawArray.length ? rawArray : rows.map((row) => ({
             row_number: row.row_number,
             values: [row.code_item, row.description, row.unit, row.volume, row.unit_price, row.total_price],
         }));
+    }, [rawData?.rows, rows]);
     const visibleColumns = useMemo(() => {
         const mappedColumns = rawData?.mappedColumns || [];
         if (mappedColumns.length) {

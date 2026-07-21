@@ -2,7 +2,7 @@ import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head } from '@inertiajs/react';
 import { useApi } from '@/hooks/useApi';
 import { useProjects } from '@/hooks/useProjects';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, Fragment } from 'react';
 import ConfirmModal from '@/Components/ui/ConfirmModal';
 
 const money = (value) => `Rp ${Number(value || 0).toLocaleString('id-ID')}`;
@@ -53,6 +53,21 @@ export default function RabControl() {
         result[status] = (result[status] || 0) + 1;
         return result;
     }, {}), [items]);
+
+    const groupedItems = useMemo(() => {
+        const groups = {};
+        items.forEach(item => {
+            const category = item.category || 'Tanpa Kategori';
+            if (!groups[category]) {
+                groups[category] = [];
+            }
+            groups[category].push(item);
+        });
+        return Object.entries(groups).map(([category, groupItems]) => ({
+            category,
+            items: groupItems
+        }));
+    }, [items]);
 
     const selectedDraftCount = items.filter((item) => (item.status || 'DRAFT') === 'DRAFT' && selectedIds.has(item.id)).length;
     const selectedPendingCount = items.filter((item) => item.status === 'PENDING' && selectedIds.has(item.id)).length;
@@ -142,14 +157,23 @@ export default function RabControl() {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-200 bg-white">
-                                        {items.length ? items.map((item) => (
-                                                <tr key={item.id} className={selectedIds.has(item.id) ? 'bg-blue-50' : ''}>
-                                                <td className="px-4 py-3"><input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggleItem(item.id)} aria-label={`Pilih ${item.description}`} /></td>
-                                                <td className="px-4 py-3 text-sm text-gray-600">{item.code_item || '-'}</td>
-                                                <td className="px-4 py-3 text-sm font-medium text-gray-900">{item.description}</td>
-                                                <td className="px-4 py-3 text-right text-sm text-gray-600">{money(item.total_price)}</td>
-                                                <td className="px-4 py-3"><Status status={item.status || 'DRAFT'} /></td>
-                                            </tr>
+                                        {groupedItems.length > 0 ? groupedItems.map((group) => (
+                                            <Fragment key={group.category}>
+                                                <tr className="bg-indigo-50 border-t-2 border-indigo-200">
+                                                    <td colSpan={5} className="px-4 py-3 text-sm font-bold text-indigo-900">
+                                                        {group.category}
+                                                    </td>
+                                                </tr>
+                                                {group.items.map((item) => (
+                                                    <tr key={item.id} className={selectedIds.has(item.id) ? 'bg-blue-50' : ''}>
+                                                        <td className="px-4 py-3"><input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggleItem(item.id)} aria-label={`Pilih ${item.description}`} /></td>
+                                                        <td className="px-4 py-3 text-sm text-gray-600">{item.code_item || '-'}</td>
+                                                        <td className="px-4 py-3 text-sm font-medium text-gray-900">{item.description}</td>
+                                                        <td className="px-4 py-3 text-right text-sm text-gray-600">{money(item.total_price)}</td>
+                                                        <td className="px-4 py-3"><Status status={item.status || 'DRAFT'} /></td>
+                                                    </tr>
+                                                ))}
+                                            </Fragment>
                                         )) : <tr><td colSpan="5" className="px-4 py-5 text-center text-sm text-gray-500">Belum ada item RAB pada proyek ini.</td></tr>}
                                     </tbody>
                                 </table>

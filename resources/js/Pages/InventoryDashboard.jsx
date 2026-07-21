@@ -127,7 +127,7 @@ export default function InventoryDashboard() {
             key: 'project_name',
             label: 'Proyek',
             sortable: true,
-            render: (val) => val || '—',
+            render: (val, row) => row.project?.project_name || val || '—',
         },
         {
             key: 'min_quantity',
@@ -146,6 +146,16 @@ export default function InventoryDashboard() {
             headerClassName: 'text-right',
             render: (_, row) => (
                 <div className="flex items-center justify-end gap-2">
+                    <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            handleRowClick(row);
+                        }}
+                    >
+                        Lihat Detail
+                    </Button>
                     <Button
                         variant="success"
                         size="sm"

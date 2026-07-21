@@ -81,13 +81,17 @@ class InventoryControllerTest extends TestCase
             ->assertOk()
             ->assertJsonStructure([
                 'success',
+                'stock_item' => ['id', 'item_name', 'quantity', 'project_name'],
+                'movements',
                 'data' => [
                     'data',
                     'current_page',
                     'per_page',
                     'total',
                 ],
-            ]);
+            ])
+            ->assertJsonPath('stock_item.id', $stock->id)
+            ->assertJsonCount(3, 'movements');
     }
 
     // ─── ADJUST ───────────────────────────────────────────────────────────
@@ -98,7 +102,8 @@ class InventoryControllerTest extends TestCase
         $stock = InventoryStock::factory()->create(['quantity' => 50]);
 
         $this->postJson("/api/inventory/{$stock->id}/adjust", [
-            'quantity' => -10,
+            'type'     => 'decrease',
+            'quantity' => 10,
             'notes'    => 'Koreksi stok fisik',
         ])
             ->assertOk()
@@ -110,8 +115,8 @@ class InventoryControllerTest extends TestCase
         ]);
         $this->assertDatabaseHas('stock_movements', [
             'inventory_stock_id' => $stock->id,
-            'type'               => 'adjustment',
-            'quantity'           => -10,
+            'type'               => 'out',
+            'quantity'           => 10,
         ]);
     }
 
@@ -122,7 +127,7 @@ class InventoryControllerTest extends TestCase
 
         $this->postJson("/api/inventory/{$stock->id}/adjust", [])
             ->assertUnprocessable()
-            ->assertJsonValidationErrors(['quantity', 'notes']);
+            ->assertJsonValidationErrors(['type', 'quantity', 'notes']);
     }
 
     public function test_adjust_positive_quantity_increases_stock(): void
@@ -131,11 +136,38 @@ class InventoryControllerTest extends TestCase
         $stock = InventoryStock::factory()->create(['quantity' => 20]);
 
         $this->postJson("/api/inventory/{$stock->id}/adjust", [
+            'type'     => 'increase',
             'quantity' => 30,
             'notes'    => 'Penambahan stok hasil opname',
         ])
             ->assertOk()
             ->assertJsonPath('data.quantity', 50);
+
+        $this->assertDatabaseHas('stock_movements', [
+            'inventory_stock_id' => $stock->id,
+            'type'               => 'in',
+            'quantity'           => 30,
+        ]);
+    }
+
+    public function test_adjust_cannot_reduce_stock_below_zero(): void
+    {
+        $this->actingAsRole('LAPANGAN');
+        $stock = InventoryStock::factory()->create(['quantity' => 5]);
+
+        $this->postJson("/api/inventory/{$stock->id}/adjust", [
+            'type'     => 'decrease',
+            'quantity' => 6,
+            'notes'    => 'Material dipakai di lapangan',
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('quantity');
+
+        $this->assertDatabaseHas('inventory_stocks', [
+            'id'       => $stock->id,
+            'quantity' => 5,
+        ]);
+        $this->assertDatabaseCount('stock_movements', 0);
     }
 
     public function test_engineer_cannot_adjust_stock(): void
@@ -144,7 +176,8 @@ class InventoryControllerTest extends TestCase
         $stock = InventoryStock::factory()->create();
 
         $this->postJson("/api/inventory/{$stock->id}/adjust", [
-            'quantity' => -5,
+            'type'     => 'decrease',
+            'quantity' => 5,
             'notes'    => 'Test',
         ])
             ->assertForbidden();

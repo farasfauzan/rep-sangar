@@ -196,13 +196,14 @@ export default function InvoiceAdmin() {
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">No. Invoice</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tipe Tagihan</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nilai (Rp)</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Dokumen Tagihan</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Aksi</th>
                                     </tr>
                                 </thead>
                                 <tbody className="bg-white divide-y divide-gray-200">
                                     {invoices.length === 0 ? (
-                                        <tr><td colSpan="5" className="px-6 py-4 text-center text-gray-500">Belum ada tagihan.</td></tr>
+                                        <tr><td colSpan="6" className="px-6 py-4 text-center text-gray-500">Belum ada tagihan.</td></tr>
                                     ) : (
                                         invoices.map((inv) => (
                                             <tr key={inv.id}>
@@ -212,6 +213,26 @@ export default function InvoiceAdmin() {
                                                 </td>
                                                 <td className="px-6 py-4 text-sm font-bold text-gray-900">
                                                     Rp {Number(inv.amount).toLocaleString('id-ID')}
+                                                </td>
+                                                <td className="px-6 py-4 text-sm">
+                                                    {(!inv.missing_documents || inv.missing_documents.length === 0) ? (
+                                                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700 border border-emerald-200">
+                                                            ✓ Lengkap
+                                                        </span>
+                                                    ) : (
+                                                        <div className="flex flex-col gap-1">
+                                                            <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-700">
+                                                                ⚠️ Kurang ({inv.missing_documents.length}):
+                                                            </span>
+                                                            <div className="flex flex-wrap gap-1">
+                                                                {inv.missing_documents.map((doc) => (
+                                                                    <span key={doc} className="rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-700">
+                                                                        {doc}
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                 </td>
                                                 <td className="px-6 py-4 text-sm">
                                                     <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${

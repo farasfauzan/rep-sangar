@@ -14,6 +14,8 @@ class Invoice extends Model
         'cashflow_status'
     ];
 
+    protected $appends = ['missing_documents'];
+
     public function invoiceable()
     {
         return $this->morphTo();
@@ -32,5 +34,17 @@ class Invoice extends Model
     public function opname()
     {
         return $this->belongsTo(Opname::class);
+    }
+
+    public function getMissingDocumentsAttribute(): array
+    {
+        $required = $this->invoiceable_type === PurchaseOrder::class
+            ? ['INVOICE', 'PO', 'SURAT_JALAN']
+            : ['INVOICE', 'SPK', 'OPNAME', 'BAST'];
+        $available = $this->relationLoaded('attachments')
+            ? $this->attachments->pluck('doc_type')->all()
+            : $this->attachments()->pluck('doc_type')->all();
+
+        return array_values(array_diff($required, $available));
     }
 }

@@ -495,7 +495,22 @@ class RabBudgetController extends Controller
             ], 403);
         }
 
-        $data = $request->only(['code_item', 'description', 'unit', 'volume', 'unit_price', 'total_price', 'category']);
+        $validated = $request->validate([
+            'code_item' => 'sometimes|string|max:255',
+            'description' => 'sometimes|string|max:255',
+            'unit' => 'nullable|string|max:50',
+            'volume' => 'nullable|numeric|min:0',
+            'unit_price' => 'nullable|numeric|min:0',
+            'total_price' => 'nullable|numeric|min:0',
+            'category' => 'nullable|string|max:255',
+            'kode' => 'sometimes|string|max:255',
+            'uraian' => 'sometimes|string|max:255',
+            'satuan' => 'nullable|string|max:50',
+            'harga_satuan' => 'nullable|numeric|min:0',
+            'jumlah' => 'nullable|numeric|min:0',
+        ]);
+
+        $data = $validated;
         foreach (['kode' => 'code_item', 'uraian' => 'description', 'satuan' => 'unit', 'harga_satuan' => 'unit_price', 'jumlah' => 'total_price'] as $old => $new) {
             if ($request->has($old)) {
                 $data[$new] = $request->input($old);

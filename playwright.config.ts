@@ -38,9 +38,9 @@ export default defineConfig({
   ],
   webServer: {
     command: 'php artisan serve --host=127.0.0.1 --port=8000',
-    cwd: resolve(__dirname, '..'),
+    cwd: __dirname,
     url: 'http://127.0.0.1:8000',
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: true,
     timeout: 120000,
   },
   timeout: 60000,

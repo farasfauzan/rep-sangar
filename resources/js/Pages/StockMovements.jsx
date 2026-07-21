@@ -1,5 +1,5 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
-import { Head, router, usePage } from '@inertiajs/react';
+import { Head, usePage } from '@inertiajs/react';
 import { useState, useEffect, useCallback } from 'react';
 import DataTable from '@/Components/ui/DataTable';
 import StatusBadge from '@/Components/ui/StatusBadge';
@@ -18,6 +18,8 @@ const movementTypeMap = {
 };
 
 export default function StockMovements({ id }) {
+    const { url } = usePage();
+    const requestedAction = new URLSearchParams(url.split('?')[1] || '').get('action');
     const api = useApi();
     const toast = useToast();
     const [item, setItem] = useState(null);
@@ -39,16 +41,9 @@ export default function StockMovements({ id }) {
         setLoading(true);
         try {
             const data = await api.get(`/api/inventory/${id}/movements`, {}, { silent: true });
-            // Expect the API to return { stock_item: {...}, movements: [...] }
-            // or a flat array; handle both shapes
-            if (data?.stock_item) {
-                setItem(data.stock_item);
-                setMovements(Array.isArray(data.movements) ? data.movements : []);
-            } else if (Array.isArray(data)) {
-                setMovements(data);
-            } else {
-                setMovements(data?.data ?? []);
-            }
+            const rows = data?.movements ?? data?.data?.data ?? data?.data ?? data ?? [];
+            setItem(data?.stock_item ?? null);
+            setMovements(Array.isArray(rows) ? rows : []);
         } catch {
             toast.error('Gagal memuat data pergerakan stok.');
         } finally {
@@ -59,6 +54,16 @@ export default function StockMovements({ id }) {
     useEffect(() => {
         fetchData();
     }, [fetchData]);
+
+    useEffect(() => {
+        if (requestedAction !== 'in' && requestedAction !== 'out') return;
+
+        setAdjustForm((form) => ({
+            ...form,
+            type: requestedAction === 'out' ? 'decrease' : 'increase',
+        }));
+        setShowAdjustModal(true);
+    }, [requestedAction]);
 
     const handleSort = (key, direction) => {
         setSortKey(key);
@@ -174,11 +179,11 @@ export default function StockMovements({ id }) {
             label: 'Jumlah',
             sortable: true,
             render: (val, row) => {
-                const isIn = row.type === 'in' || row.type === 'adjustment';
-                const sign = row.type === 'out' ? '-' : '+';
+                const quantity = Number(val);
+                const isOut = row.type === 'out' || quantity < 0;
                 return (
-                    <span className={`font-semibold ${row.type === 'out' ? 'text-red-600' : 'text-emerald-600'}`}>
-                        {sign}{Number(val).toLocaleString('id-ID')}
+                    <span className={`font-semibold ${isOut ? 'text-red-600' : 'text-emerald-600'}`}>
+                        {isOut ? '-' : '+'}{Math.abs(quantity).toLocaleString('id-ID')}
                     </span>
                 );
             },
@@ -196,7 +201,7 @@ export default function StockMovements({ id }) {
             key: 'created_by',
             label: 'Dibuat Oleh',
             render: (val, row) => {
-                const name = val || row.user?.name || '—';
+                const name = row.creator?.name || row.user?.name || val || '—';
                 return <span className="text-sm text-gray-600">{name}</span>;
             },
         },
@@ -244,7 +249,7 @@ export default function StockMovements({ id }) {
                             <Card>
                                 <p className="text-sm text-gray-500">Proyek</p>
                                 <p className="text-lg font-semibold text-gray-900 truncate">
-                                    {item.project_name || '—'}
+                                    {item.project_name || item.project?.project_name || '—'}
                                 </p>
                             </Card>
                             <Card>
@@ -320,7 +325,7 @@ export default function StockMovements({ id }) {
                     setErrors({});
                     setAdjustForm({ type: 'increase', quantity: '', notes: '' });
                 }}
-                title="Penyesuaian Stok"
+                title={adjustForm.type === 'increase' ? 'Stok Masuk' : 'Stok Keluar'}
                 size="md"
             >
                 <form onSubmit={handleAdjustSubmit} className="space-y-4">

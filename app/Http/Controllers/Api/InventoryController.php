@@ -9,12 +9,13 @@ use App\Models\StockMovement;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class InventoryController extends Controller
 {
     public function index(Request $request)
     {
-        $query = InventoryStock::with('rabBudget');
+        $query = InventoryStock::with(['project', 'rabBudget']);
 
         if ($projectId = $request->get('project_id')) {
             $query->where('project_id', $projectId);
@@ -87,6 +88,7 @@ class InventoryController extends Controller
      */
     public function movements(Request $request, InventoryStock $stock)
     {
+        $stock->load('project:id,project_name');
         $movements = StockMovement::where('inventory_stock_id', $stock->id)
             ->with('creator')
             ->orderByDesc('created_at')
@@ -94,6 +96,16 @@ class InventoryController extends Controller
 
         return response()->json([
             'success' => true,
+            'stock_item' => [
+                'id' => $stock->id,
+                'item_name' => $stock->item_name,
+                'quantity' => $stock->quantity,
+                'min_quantity' => $stock->min_quantity,
+                'unit' => $stock->unit,
+                'location' => $stock->location,
+                'project_name' => $stock->project?->project_name,
+            ],
+            'movements' => $movements->items(),
             'data' => $movements,
         ]);
     }
@@ -103,29 +115,47 @@ class InventoryController extends Controller
      */
     public function adjust(Request $request, InventoryStock $stock)
     {
-        $request->validate([
-            'quantity' => 'required|numeric',
+        $validated = $request->validate([
+            'type'     => 'required|in:increase,decrease',
+            'quantity' => 'required|numeric|gt:0',
             'notes'    => 'required|string',
         ]);
 
-        DB::transaction(function () use ($request, $stock) {
+        $quantity = (float) $validated['quantity'];
+        $movementType = $validated['type'] === 'increase' ? 'in' : 'out';
+
+        DB::transaction(function () use ($movementType, $quantity, $stock, $validated) {
+            if ($movementType === 'in') {
+                InventoryStock::whereKey($stock->id)->increment('quantity', $quantity);
+            } else {
+                $updated = InventoryStock::whereKey($stock->id)
+                    ->where('quantity', '>=', $quantity)
+                    ->decrement('quantity', $quantity);
+
+                if ($updated === 0) {
+                    throw ValidationException::withMessages([
+                        'quantity' => 'Jumlah stok keluar melebihi stok yang tersedia.',
+                    ]);
+                }
+            }
+
             StockMovement::create([
                 'inventory_stock_id' => $stock->id,
-                'type'               => 'adjustment',
-                'quantity'           => $request->quantity,
-                'notes'              => $request->notes,
+                'type'               => $movementType,
+                'quantity'           => $quantity,
+                'notes'              => $validated['notes'],
                 'created_by'         => Auth::id(),
             ]);
-
-            $stock->increment('quantity', $request->quantity);
         });
 
         $stock->refresh();
 
+        $action = $movementType === 'in' ? 'bertambah' : 'berkurang';
+
         return response()->json([
             'success' => true,
             'data'    => $stock,
-            'message' => "Stok {$stock->item_name} disesuaikan sebanyak {$request->quantity} {$stock->unit}",
+            'message' => "Stok {$stock->item_name} {$action} sebanyak {$quantity} {$stock->unit}",
         ]);
     }
 }

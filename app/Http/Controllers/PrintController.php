@@ -38,8 +38,18 @@ class PrintController extends Controller
     public function purchaseOrderPdf(int $id): Response
     {
         $po = PurchaseOrder::with(['items.rabBudget', 'project', 'attachments'])->findOrFail($id);
-        $pdf = Pdf::loadView('print.purchase-order', ['po' => $po])
+        $pdf = Pdf::loadView('print.purchase-order', ['po' => $po, 'isPdf' => true])
             ->setPaper('a4', 'portrait');
+
+        $pdf->render();
+        $pdf->getDomPDF()->getCanvas()->page_text(
+            260,
+            830,
+            'Halaman {PAGE_NUM} dari {PAGE_COUNT}',
+            'Helvetica',
+            8,
+            [0.4, 0.4, 0.4]
+        );
 
         return $pdf->download("PO-{$po->po_number}.pdf");
     }

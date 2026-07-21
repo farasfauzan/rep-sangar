@@ -55,16 +55,18 @@ class ExecuteRabImportJob implements ShouldQueue
                 return;
             }
 
-            // 2. Determine versions
             $projectId = $job->project_id;
-            $currentMaxVersion = RabBudget::where('project_id', $projectId)->max('version') ?? 0;
-            $newVersion = $currentMaxVersion + 1;
 
             $batchSize = 100;
             $batch = [];
             $totalImported = 0;
 
             DB::beginTransaction();
+
+            // 2. Determine versions inside the transaction so concurrent imports
+            // cannot obtain the same next-version value.
+            $currentMaxVersion = RabBudget::where('project_id', $projectId)->max('version') ?? 0;
+            $newVersion = $currentMaxVersion + 1;
 
             foreach ($validSheets as $sheetInfo) {
                 // Bug #2 fix: Reset code counters per sheet to avoid state leaking
@@ -214,29 +216,7 @@ class ExecuteRabImportJob implements ShouldQueue
                 $job->update(['processed_rows' => $totalImported]);
             }
 
-            // 3. AI classification for all new items (async, non-blocking)
-            // Dispatch classification in chunks so API latency does not hold up the import transaction.
-            $mimo = app(MimoAiService::class);
-            if ($mimo->isConfigured()) {
-                $newItemCount = RabBudget::where('project_id', $projectId)
-                    ->where('version', $newVersion)
-                    ->whereNull('ai_category')
-                    ->count();
-
-                $chunkSize = 100;
-                for ($offset = 0; $offset < $newItemCount; $offset += $chunkSize) {
-                    ClassifyRabAiJob::dispatch($projectId, $newVersion, $offset, $chunkSize);
-                }
-
-                Log::info('AI classification dispatched', [
-                    'project_id' => $projectId,
-                    'version' => $newVersion,
-                    'items' => $newItemCount,
-                    'chunks' => ceil($newItemCount / $chunkSize),
-                ]);
-            }
-
-            // 4. Remap references from old version to new version
+            // 3. Remap references from old version to new version
             $oldActiveRabs = RabBudget::where('project_id', $projectId)
                 ->where('version', $currentMaxVersion)
                 ->get();
@@ -244,6 +224,23 @@ class ExecuteRabImportJob implements ShouldQueue
             $newActiveRabs = RabBudget::where('project_id', $projectId)
                 ->where('version', $newVersion)
                 ->get();
+
+            // Detect duplicate remap keys in the new dataset before building the
+            // key-based lookup map. Collisions would cause references to be mapped
+            // to the wrong new item.
+            $newRabKeys = [];
+            $duplicateKeys = [];
+            foreach ($newActiveRabs as $newItem) {
+                $key = $this->getUniqueKey($newItem->code_item, $newItem->description, $newItem->category);
+                if (isset($newRabKeys[$key])) {
+                    $duplicateKeys[$key] = true;
+                } else {
+                    $newRabKeys[$key] = true;
+                }
+            }
+            if ($duplicateKeys !== []) {
+                throw new \RuntimeException('Duplikat kode/deskripsi RAB ditemukan, tidak dapat memetakan ulang referensi PO/PR. Duplikat: '.implode(', ', array_keys($duplicateKeys)));
+            }
 
             $newRabsByKey = $newActiveRabs->keyBy(function ($item) {
                 return $this->getUniqueKey($item->code_item, $item->description, $item->category);
@@ -273,7 +270,7 @@ class ExecuteRabImportJob implements ShouldQueue
                 }
             }
 
-            // 5. Archive & soft-delete older version items
+            // 4. Archive & soft-delete older version items
             if ($currentMaxVersion > 0) {
                 // Use withTrashed to update status on rows we're about to soft-delete,
                 // so the audit trail keeps ARCHIVED even after deletion.
@@ -287,7 +284,7 @@ class ExecuteRabImportJob implements ShouldQueue
                     ->delete(); // Soft delete
             }
 
-            // 6. Create inventory stocks for newly added RAB items
+            // 5. Create inventory stocks for newly added RAB items
             $existingStockRabs = InventoryStock::where('project_id', $projectId)
                 ->pluck('rab_budget_id')
                 ->filter()
@@ -320,6 +317,28 @@ class ExecuteRabImportJob implements ShouldQueue
             }
 
             DB::commit();
+
+            // 6. AI classification for all new items (async, non-blocking).
+            // Dispatched AFTER commit so it does not hold the import transaction.
+            $mimo = app(MimoAiService::class);
+            if ($mimo->isConfigured()) {
+                $newItemCount = RabBudget::where('project_id', $projectId)
+                    ->where('version', $newVersion)
+                    ->whereNull('ai_category')
+                    ->count();
+
+                $chunkSize = 100;
+                for ($offset = 0; $offset < $newItemCount; $offset += $chunkSize) {
+                    ClassifyRabAiJob::dispatch($projectId, $newVersion, $offset, $chunkSize);
+                }
+
+                Log::info('AI classification dispatched', [
+                    'project_id' => $projectId,
+                    'version' => $newVersion,
+                    'items' => $newItemCount,
+                    'chunks' => ceil($newItemCount / $chunkSize),
+                ]);
+            }
 
             $job->update([
                 'status' => RabImportJob::STATUS_COMPLETED,
