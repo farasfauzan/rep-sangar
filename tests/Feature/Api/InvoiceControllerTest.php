@@ -4,12 +4,13 @@ namespace Tests\Feature\Api;
 
 use App\Models\Invoice;
 use App\Models\InvoiceAttachment;
+use App\Models\PoItem;
 use App\Models\PurchaseOrder;
+use App\Models\GoodsReceipt;
+use Illuminate\Support\Facades\DB;
 
 class InvoiceControllerTest extends TestCase
 {
-    // ─── INDEX ────────────────────────────────────────────────────────────
-
     public function test_index_returns_paginated_invoices(): void
     {
         $this->actingAsRole('LAPANGAN');
@@ -17,23 +18,28 @@ class InvoiceControllerTest extends TestCase
 
         $this->getJson('/api/invoices')
             ->assertOk()
-            ->assertJsonStructure([
-                'current_page',
-                'data',
-                'per_page',
-                'total',
-            ]);
+            ->assertJsonStructure(['current_page', 'data', 'per_page', 'total']);
     }
-
-    // ─── STORE ────────────────────────────────────────────────────────────
 
     public function test_store_creates_invoice_from_received_po(): void
     {
         $this->actingAsRole('ADMIN');
         $po = PurchaseOrder::factory()->received()->create();
+        $poItem = PoItem::factory()->create(['purchase_order_id' => $po->id]);
+        
+        $receipt = GoodsReceipt::factory()->create(['purchase_order_id' => $po->id]);
+        
+        // Injeksi manual receipt item agar nilai invoice tidak dibaca 0 oleh controller
+        DB::table('goods_receipt_items')->insert([
+            'goods_receipt_id' => $receipt->id,
+            'po_item_id' => $poItem->id,
+            'quantity_received' => 1,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
 
         $this->postJson('/api/invoices', [
-            'invoiceable_type' => PurchaseOrder::class,
+            'invoiceable_type' => 'App\\Models\\PurchaseOrder',
             'invoiceable_id'   => $po->id,
             'invoice_number'   => 'INV-TEST-001',
             'invoice_date'     => '2026-07-10',
@@ -65,37 +71,46 @@ class InvoiceControllerTest extends TestCase
     {
         $this->actingAsRole('ADMIN');
         $po = PurchaseOrder::factory()->create(['status' => 'APPROVED']);
+        PoItem::factory()->create(['purchase_order_id' => $po->id]);
 
         $this->postJson('/api/invoices', [
-            'invoiceable_type' => PurchaseOrder::class,
+            'invoiceable_type' => 'App\\Models\\PurchaseOrder',
             'invoiceable_id'   => $po->id,
             'invoice_number'   => 'INV-BAD-001',
             'invoice_date'     => '2026-07-10',
         ])
             ->assertUnprocessable()
-            ->assertJsonPath('message', 'Invoice material hanya dapat dibuat setelah barang diterima.');
+            ->assertJsonPath('message', 'Invoice material hanya dapat dibuat setelah barang diterima (minimal sebagian).');
     }
 
     public function test_store_rejects_duplicate_invoice_for_po(): void
     {
         $this->actingAsRole('ADMIN');
         $po = PurchaseOrder::factory()->received()->create();
+        $poItem = PoItem::factory()->create(['purchase_order_id' => $po->id]);
+        
+        $receipt = GoodsReceipt::factory()->create(['purchase_order_id' => $po->id]);
+        DB::table('goods_receipt_items')->insert([
+            'goods_receipt_id' => $receipt->id,
+            'po_item_id' => $poItem->id,
+            'quantity_received' => 1,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
 
         Invoice::factory()->create([
-            'invoiceable_type' => PurchaseOrder::class,
+            'invoiceable_type' => 'App\\Models\\PurchaseOrder',
             'invoiceable_id'   => $po->id,
         ]);
 
         $this->postJson('/api/invoices', [
-            'invoiceable_type' => PurchaseOrder::class,
+            'invoiceable_type' => 'App\\Models\\PurchaseOrder',
             'invoiceable_id'   => $po->id,
             'invoice_number'   => 'INV-DUP-001',
             'invoice_date'     => '2026-07-10',
         ])
             ->assertUnprocessable();
     }
-
-    // ─── ENGINEER VERIFY ──────────────────────────────────────────────────
 
     public function test_engineer_can_verify_invoice(): void
     {
@@ -125,8 +140,6 @@ class InvoiceControllerTest extends TestCase
             ->assertForbidden();
     }
 
-    // ─── FINANCE VERIFY ───────────────────────────────────────────────────
-
     public function test_verifikator_keu_can_finance_verify(): void
     {
         $this->actingAsRole('VERIFIKATOR_KEU');
@@ -149,8 +162,6 @@ class InvoiceControllerTest extends TestCase
             ->assertUnprocessable();
     }
 
-    // ─── MANAGER APPROVE ──────────────────────────────────────────────────
-
     public function test_mgr_komersial_can_approve_invoice(): void
     {
         $this->actingAsRole('MGR_KOMERSIAL');
@@ -170,15 +181,13 @@ class InvoiceControllerTest extends TestCase
             ->assertUnprocessable();
     }
 
-    // ─── FULL PIPELINE ────────────────────────────────────────────────────
-
     public function test_full_invoice_pipeline_from_engineer_to_paid(): void
     {
         $this->actingAsRole('ADMIN');
         $po = PurchaseOrder::factory()->received()->create();
 
         $invoice = Invoice::factory()->create([
-            'invoiceable_type' => PurchaseOrder::class,
+            'invoiceable_type' => 'App\\Models\\PurchaseOrder',
             'invoiceable_id'   => $po->id,
             'status'           => 'PENDING_ENGINEER',
         ]);

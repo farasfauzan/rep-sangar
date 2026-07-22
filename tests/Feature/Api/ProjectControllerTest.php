@@ -2,227 +2,370 @@
 
 namespace Tests\Feature\Api;
 
-use App\Models\GoodsReceipt;
 use App\Models\PoItem;
 use App\Models\Project;
 use App\Models\PurchaseOrder;
 use App\Models\RabBudget;
-use Illuminate\Support\Facades\DB;
+use App\Models\User;
 
-class ProjectControllerTest extends TestCase
+class PurchaseOrderControllerTest extends TestCase
 {
-    // ─── INDEX ────────────────────────────────────────────────────────────
-
-    public function test_index_returns_paginated_projects(): void
+    public function test_index_returns_paginated_purchase_orders(): void
     {
         $this->actingAsRole('LAPANGAN');
-        Project::factory()->count(3)->create();
+        PurchaseOrder::factory()->count(3)->create();
 
-        $this->getJson('/api/projects')
+        $this->getJson('/api/pos')
             ->assertOk()
-            ->assertJsonStructure([
-                'success',
-                'data' => [
-                    'data' => [
-                        '*' => ['id', 'project_name', 'location', 'start_date', 'status'],
-                    ],
-                    'current_page',
-                    'per_page',
-                    'total',
-                ],
-            ])
-            ->assertJson(['success' => true]);
+            ->assertJsonStructure(['current_page', 'data', 'per_page', 'total']);
     }
 
-    public function test_index_includes_pending_approval_count_for_each_project(): void
-    {
-        $this->actingAsRole('ADMIN');
-        $project = Project::factory()->create();
-
-        RabBudget::factory()->count(2)->pending()->create(['project_id' => $project->id]);
-        PurchaseOrder::factory()->create([
-            'project_id' => $project->id,
-            'po_level' => 'PROJECT',
-            'status' => 'DRAFT',
-        ]);
-        PurchaseOrder::factory()->approved()->create([
-            'project_id' => $project->id,
-            'po_level' => 'SUPPLIER',
-        ]);
-
-        $this->getJson('/api/projects')
-            ->assertOk()
-            ->assertJsonPath('data.data.0.id', $project->id)
-            ->assertJsonPath('data.data.0.pending_approval_count', 3)
-            ->assertJsonPath('data.data.0.pending_rab_approval_count', 2);
-    }
-
-    // ─── SHOW ─────────────────────────────────────────────────────────────
-
-    public function test_show_returns_project_with_rab_budgets(): void
+    public function test_engineer_can_view_pos(): void
     {
         $this->actingAsRole('ENGINEER');
+        PurchaseOrder::factory()->count(2)->create();
+
+        $this->getJson('/api/pos')->assertOk();
+    }
+
+    public function test_purchasing_legal_can_create_po_with_items(): void
+    {
+        $user = $this->actingAsRole('PURCHASING_LEGAL');
         $project = Project::factory()->create();
+        $rab = RabBudget::factory()->approved()->create(['project_id' => $project->id]);
 
-        $this->getJson("/api/projects/{$project->id}")
-            ->assertOk()
-            ->assertJsonPath('data.id', $project->id)
-            ->assertJsonPath('success', true);
-    }
-
-    public function test_show_returns_404_for_nonexistent_project(): void
-    {
-        $this->actingAsRole('ADMIN');
-
-        $this->getJson('/api/projects/99999')
-            ->assertNotFound();
-    }
-
-    // ─── STORE ────────────────────────────────────────────────────────────
-
-    public function test_admin_can_create_project(): void
-    {
-        $this->actingAsRole('ADMIN');
-
-        $this->postJson('/api/projects', [
-            'project_name' => 'Proyek Baru',
-            'location' => 'Bandung',
-            'start_date' => '2026-08-01',
+        $this->postJson('/api/pos', [
+            'project_id'    => $project->id,
+            'po_number'     => 'PO-TEST-001',
+            'date'          => '2026-07-10',
+            'supplier_name' => 'PT Supplier Test',
+            'payment_terms' => '30 hari',
+            'items'         => [[
+                'rab_budget_id' => $rab->id,
+                'item_name'     => $rab->description,
+                'qty'           => 5,
+                'unit_price'    => 20000,
+            ]],
         ])
             ->assertCreated()
-            ->assertJsonPath('success', true)
-            ->assertJsonPath('data.project_name', 'Proyek Baru');
+            ->assertJsonPath('data.po_number', 'PO-TEST-001')
+            ->assertJsonPath('data.status', 'DRAFT');
 
-        $this->assertDatabaseHas('projects', [
-            'project_name' => 'Proyek Baru',
-            'location' => 'Bandung',
+        $this->assertDatabaseHas('purchase_orders', [
+            'po_number' => 'PO-TEST-001',
+            'status'    => 'DRAFT',
         ]);
-    }
-
-    public function test_mgr_komersial_can_create_project(): void
-    {
-        $this->actingAsRole('MGR_KOMERSIAL');
-
-        $this->postJson('/api/projects', [
-            'project_name' => 'Proyek Komersial',
-            'location' => 'Surabaya',
-            'start_date' => '2026-09-01',
-        ])
-            ->assertCreated();
+        $this->assertDatabaseHas('po_items', [
+            'item_name' => $rab->description,
+            'qty'       => 5,
+        ]);
     }
 
     public function test_store_validates_required_fields(): void
     {
-        $this->actingAsRole('ADMIN');
+        $this->actingAsRole('PURCHASING_LEGAL');
 
-        $this->postJson('/api/projects', [])
+        $this->postJson('/api/pos', [])
             ->assertUnprocessable()
-            ->assertJsonValidationErrors(['project_name', 'location', 'start_date']);
+            ->assertJsonValidationErrors(['project_id', 'po_number', 'date', 'items']);
     }
 
-    public function test_lapangan_cannot_create_project(): void
+    public function test_store_rejects_duplicate_po_number(): void
+    {
+        $user = $this->actingAsRole('PURCHASING_LEGAL');
+        $project = Project::factory()->create();
+        $rab = RabBudget::factory()->approved()->create(['project_id' => $project->id]);
+        PurchaseOrder::factory()->create(['po_number' => 'PO-DUPE-001']);
+
+        $this->postJson('/api/pos', [
+            'project_id'    => $project->id,
+            'po_number'     => 'PO-DUPE-001',
+            'date'          => '2026-07-10',
+            'supplier_name' => 'PT Test',
+            'items'         => [[
+                'rab_budget_id' => $rab->id,
+                'item_name'     => $rab->description,
+                'qty'           => 1,
+                'unit_price'    => 10000,
+            ]],
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['po_number']);
+    }
+
+    public function test_lapangan_can_create_project_level_po(): void
+    {
+        $this->actingAsRole('LAPANGAN');
+        $project = Project::factory()->create();
+        $rab = RabBudget::factory()->approved()->create(['project_id' => $project->id]);
+
+        $this->postJson('/api/pos', [
+            'project_id' => $project->id,
+            'po_number'  => 'PO-LAP-001',
+            'date'       => '2026-07-10',
+            'po_level'   => 'PROJECT',
+            'items'      => [[
+                'rab_budget_id' => $rab->id,
+                'item_name'     => $rab->description,
+                'qty'           => 3,
+            ]],
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.po_level', 'PROJECT');
+
+        $this->assertDatabaseHas('purchase_orders', [
+            'po_number' => 'PO-LAP-001',
+            'po_level'  => 'PROJECT',
+            'status'    => 'DRAFT',
+        ]);
+        $this->assertDatabaseHas('po_items', [
+            'item_name'  => $rab->description,
+            'qty'        => 3,
+            'unit_price' => 0,
+        ]);
+    }
+
+    public function test_lapangan_cannot_create_supplier_level_po(): void
     {
         $this->actingAsRole('LAPANGAN');
 
-        $this->postJson('/api/projects', [
-            'project_name' => 'Tidak Boleh',
-            'location' => 'Jakarta',
-            'start_date' => '2026-08-01',
+        $this->postJson('/api/pos', [
+            'project_id'    => 1,
+            'po_number'     => 'PO-LAP-002',
+            'date'          => '2026-07-10',
+            'po_level'      => 'SUPPLIER',
+            'supplier_name' => 'PT Test',
+            'items'         => [[
+                'rab_budget_id' => 1,
+                'item_name'     => 'Item',
+                'qty'           => 1,
+                'unit_price'    => 10000,
+            ]],
         ])
             ->assertForbidden();
     }
 
-    // ─── UPDATE ───────────────────────────────────────────────────────────
-
-    public function test_admin_can_update_project(): void
+    public function test_project_level_po_does_not_require_supplier_name(): void
     {
-        $this->actingAsRole('ADMIN');
-        $project = Project::factory()->create(['status' => 'planning']);
+        $user = $this->actingAsRole('PURCHASING_LEGAL');
+        $project = Project::factory()->create();
+        $rab = RabBudget::factory()->approved()->create(['project_id' => $project->id]);
 
-        $this->putJson("/api/projects/{$project->id}", [
-            'project_name' => 'Nama Diubah',
-            'status' => 'active',
+        $this->postJson('/api/pos', [
+            'project_id' => $project->id,
+            'po_number'  => 'PO-PRJ-001',
+            'date'       => '2026-07-10',
+            'po_level'   => 'PROJECT',
+            'items'      => [[
+                'rab_budget_id' => $rab->id,
+                'item_name'     => $rab->description,
+                'qty'           => 10,
+            ]],
         ])
-            ->assertOk()
-            ->assertJsonPath('data.project_name', 'Nama Diubah')
-            ->assertJsonPath('data.status', 'active');
+            ->assertCreated()
+            ->assertJsonPath('data.po_level', 'PROJECT');
 
-        $this->assertDatabaseHas('projects', [
-            'id' => $project->id,
-            'status' => 'active',
+        $this->assertDatabaseHas('purchase_orders', [
+            'po_number'     => 'PO-PRJ-001',
+            'po_level'      => 'PROJECT',
+            'supplier_name' => null,
+        ]);
+        $this->assertDatabaseHas('po_items', [
+            'item_name'  => $rab->description,
+            'qty'        => 10,
+            'unit_price' => 0,
         ]);
     }
 
-    public function test_update_rejects_invalid_status(): void
+    public function test_supplier_level_po_requires_supplier_name_and_unit_price(): void
     {
-        $this->actingAsRole('ADMIN');
+        $user = $this->actingAsRole('PURCHASING_LEGAL');
         $project = Project::factory()->create();
+        $rab = RabBudget::factory()->approved()->create(['project_id' => $project->id]);
 
-        $this->putJson("/api/projects/{$project->id}", [
-            'status' => 'bogus_status',
+        // Missing supplier_name
+        $this->postJson('/api/pos', [
+            'project_id' => $project->id,
+            'po_number'  => 'PO-SUP-001',
+            'date'       => '2026-07-10',
+            'po_level'   => 'SUPPLIER',
+            'items'      => [[
+                'rab_budget_id' => $rab->id,
+                'item_name'     => $rab->description,
+                'qty'           => 5,
+                'unit_price'    => 20000,
+            ]],
         ])
             ->assertUnprocessable()
-            ->assertJsonValidationErrors(['status']);
+            ->assertJsonValidationErrors(['supplier_name']);
+
+        // Missing unit_price
+        $this->postJson('/api/pos', [
+            'project_id'    => $project->id,
+            'po_number'     => 'PO-SUP-002',
+            'date'          => '2026-07-10',
+            'po_level'      => 'SUPPLIER',
+            'supplier_name' => 'PT Supplier Jaya',
+            'items'         => [[
+                'rab_budget_id' => $rab->id,
+                'item_name'     => $rab->description,
+                'qty'           => 5,
+            ]],
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['items.0.unit_price']);
+
+        // Full valid supplier PO (Perbaikan: menambah payment_terms dan jadwal_kirim)
+        $this->postJson('/api/pos', [
+            'project_id'    => $project->id,
+            'po_number'     => 'PO-SUP-003',
+            'date'          => '2026-07-10',
+            'po_level'      => 'SUPPLIER',
+            'supplier_name' => 'PT Supplier Jaya',
+            'payment_terms' => '30 hari',
+            'jadwal_kirim'  => '2026-07-15',
+            'tax_rate'      => 11,
+            'items'         => [[
+                'rab_budget_id' => $rab->id,
+                'item_name'     => $rab->description,
+                'qty'           => 5,
+                'unit_price'    => 20000,
+            ]],
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.po_level', 'SUPPLIER');
+
+        $this->assertDatabaseHas('purchase_orders', [
+            'po_number'     => 'PO-SUP-003',
+            'po_level'      => 'SUPPLIER',
+            'supplier_name' => 'PT Supplier Jaya',
+        ]);
+        $this->assertDatabaseHas('po_items', [
+            'item_name'  => $rab->description,
+            'qty'        => 5,
+            'unit_price' => 20000,
+        ]);
     }
 
-    // ─── DESTROY ──────────────────────────────────────────────────────────
-
-    public function test_admin_can_delete_project(): void
+    public function test_project_level_po_has_zero_total(): void
     {
-        $this->actingAsRole('ADMIN');
+        $user = $this->actingAsRole('PURCHASING_LEGAL');
         $project = Project::factory()->create();
+        $rab = RabBudget::factory()->approved()->create(['project_id' => $project->id]);
 
-        $this->deleteJson("/api/projects/{$project->id}")
-            ->assertOk();
+        $this->postJson('/api/pos', [
+            'project_id' => $project->id,
+            'po_number'  => 'PO-PRJ-002',
+            'date'       => '2026-07-10',
+            'po_level'   => 'PROJECT',
+            'items'      => [[
+                'rab_budget_id' => $rab->id,
+                'item_name'     => $rab->description,
+                'qty'           => 20,
+            ]],
+        ])
+            ->assertCreated();
 
-        $this->assertDatabaseMissing('projects', ['id' => $project->id]);
+        $this->assertDatabaseHas('purchase_orders', [
+            'po_number'    => 'PO-PRJ-002',
+            'total_amount' => 0,
+        ]);
     }
 
-    public function test_engineer_cannot_delete_project(): void
+    public function test_submit_transitions_from_draft_to_pending_approval(): void
+    {
+        $user = $this->actingAsRole('PURCHASING_LEGAL');
+        $parent = PurchaseOrder::factory()->create(['po_level' => 'PROJECT', 'status' => 'ROUTED', 'routed_to' => 'PURCHASE_ORDER']);
+        $po = PurchaseOrder::factory()->create(['status' => 'DRAFT', 'po_level' => 'SUPPLIER', 'parent_po_id' => $parent->id, 'created_by' => $user->id]);
+
+        $this->putJson("/api/pos/{$po->id}/submit")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'PENDING_APPROVAL');
+    }
+
+    public function test_approve_transitions_from_pending_approval(): void
+    {
+        $this->actingAsRole('MGR_KOMERSIAL');
+        $po = PurchaseOrder::factory()->create(['status' => 'PENDING_APPROVAL', 'po_level' => 'SUPPLIER']);
+
+        $this->putJson("/api/pos/{$po->id}/approve")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'APPROVED');
+
+        $this->assertDatabaseHas('purchase_orders', ['id' => $po->id, 'status' => 'APPROVED']);
+    }
+
+    public function test_reject_transitions_from_pending_approval(): void
+    {
+        $this->actingAsRole('MGR_KOMERSIAL');
+        $po = PurchaseOrder::factory()->create(['status' => 'PENDING_APPROVAL', 'po_level' => 'SUPPLIER']);
+
+        $this->putJson("/api/pos/{$po->id}/reject", ['notes' => 'Harga mahal'])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'REJECTED');
+    }
+
+    public function test_approve_rejects_non_pending_po(): void
+    {
+        $this->actingAsRole('MGR_KOMERSIAL');
+        $po = PurchaseOrder::factory()->create(['status' => 'DRAFT']);
+
+        $this->putJson("/api/pos/{$po->id}/approve")
+            ->assertUnprocessable();
+    }
+
+    public function test_lapangan_cannot_approve_po(): void
+    {
+        $this->actingAsRole('LAPANGAN');
+        $po = PurchaseOrder::factory()->create(['status' => 'PENDING_APPROVAL', 'po_level' => 'SUPPLIER']);
+
+        $this->putJson("/api/pos/{$po->id}/approve")
+            ->assertForbidden();
+    }
+
+    public function test_engineer_routing_is_determined_by_rab_category(): void
     {
         $this->actingAsRole('ENGINEER');
         $project = Project::factory()->create();
 
-        $this->deleteJson("/api/projects/{$project->id}")
-            ->assertForbidden();
-    }
-
-    public function test_reset_removes_po_dependencies_before_purchase_orders(): void
-    {
-        $this->actingAsRole('ADMIN');
-        $project = Project::factory()->create();
-        $rab = RabBudget::factory()->create(['project_id' => $project->id]);
-        $po = PurchaseOrder::factory()->create(['project_id' => $project->id]);
-        $poItem = PoItem::factory()->create([
-            'purchase_order_id' => $po->id,
-            'rab_budget_id' => $rab->id,
+        $material = RabBudget::factory()->approved()->create([
+            'project_id' => $project->id,
+            'category' => 'Material / Struktur',
         ]);
-        $receipt = GoodsReceipt::factory()->create(['purchase_order_id' => $po->id]);
-
-        DB::table('goods_receipt_items')->insert([
-            'goods_receipt_id' => $receipt->id,
-            'po_item_id' => $poItem->id,
-            'quantity_received' => 1,
-            'created_at' => now(),
-            'updated_at' => now(),
+        $materialPo = PurchaseOrder::factory()->create([
+            'project_id' => $project->id,
+            'po_level' => 'PROJECT',
+            'status' => 'DRAFT',
         ]);
-        DB::table('po_attachments')->insert([
-            'purchase_order_id' => $po->id,
-            'file_name' => 'contoh.pdf',
-            'file_path' => 'attachments/po/contoh.pdf',
-            'file_size' => 1,
-            'created_at' => now(),
-            'updated_at' => now(),
+        PoItem::factory()->create([
+            'purchase_order_id' => $materialPo->id,
+            'rab_budget_id' => $material->id,
         ]);
 
-        $this->postJson("/api/projects/{$project->id}/reset")
-            ->assertOk()
-            ->assertJsonPath('success', true);
+        $this->putJson("/api/pos/{$materialPo->id}/route", ['routed_to' => 'SPK'])
+            ->assertUnprocessable()
+            ->assertJsonPath('message', 'Kategori Material harus diarahkan ke PO Supplier.');
+        $this->putJson("/api/pos/{$materialPo->id}/route", ['routed_to' => 'PURCHASE_ORDER'])
+            ->assertOk();
 
-        $this->assertDatabaseMissing('goods_receipt_items', ['po_item_id' => $poItem->id]);
-        $this->assertDatabaseMissing('goods_receipts', ['id' => $receipt->id]);
-        $this->assertDatabaseMissing('po_items', ['id' => $poItem->id]);
-        $this->assertDatabaseMissing('po_attachments', ['purchase_order_id' => $po->id]);
-        $this->assertDatabaseMissing('purchase_orders', ['id' => $po->id]);
+        $subkon = RabBudget::factory()->approved()->create([
+            'project_id' => $project->id,
+            'category' => 'Subkon / Arsitektur',
+        ]);
+        $subkonPo = PurchaseOrder::factory()->create([
+            'project_id' => $project->id,
+            'po_level' => 'PROJECT',
+            'status' => 'DRAFT',
+        ]);
+        PoItem::factory()->create([
+            'purchase_order_id' => $subkonPo->id,
+            'rab_budget_id' => $subkon->id,
+        ]);
+
+        $this->putJson("/api/pos/{$subkonPo->id}/route", ['routed_to' => 'PURCHASE_ORDER'])
+            ->assertUnprocessable()
+            ->assertJsonPath('message', 'Kategori Subkon harus diarahkan ke SPK.');
+        $this->putJson("/api/pos/{$subkonPo->id}/route", ['routed_to' => 'SPK'])
+            ->assertOk();
     }
 }

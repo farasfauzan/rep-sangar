@@ -24,7 +24,7 @@ class SpkFactory extends Factory
             'subtotal'      => 100000,
             'tax_amount'    => 11000,
             'total_amount'  => 111000,
-            'include_ppn'   => true,
+            'tax_rate'      => 11,
             'payment_terms' => 'Berdasarkan opname',
             'jadwal_kirim'  => null,
             'status'        => 'DRAFT',

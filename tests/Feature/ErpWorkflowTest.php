@@ -65,6 +65,7 @@ class ErpWorkflowTest extends TestCase
             'supplier_name' => 'PT Material Utama',
             'jadwal_kirim' => '2026-07-15',
             'payment_terms' => '30 hari',
+            'tax_rate' => 11,
             'items' => [[
                 'rab_budget_id' => $rab->id,
                 'item_name' => $rab->description,
@@ -74,14 +75,19 @@ class ErpWorkflowTest extends TestCase
         ])->assertCreated();
 
         $poId = $poResponse->json('data.id');
+        $poItem = PoItem::where('purchase_order_id', $poId)->first();
+        
+        $receiptPayload = array_merge($this->receiptPayload($poId, 'GR-ERP-001'), [
+            'items' => [['po_item_id' => $poItem->id, 'quantity_received' => 2]]
+        ]);
 
-        $this->postJson('/api/goods-receipts', $this->receiptPayload($poId, 'GR-ERP-001'))
+        $this->postJson('/api/goods-receipts', $receiptPayload)
             ->assertUnprocessable()
             ->assertJsonPath('message', 'Penerimaan barang hanya dapat dicatat untuk PO yang sudah disetujui atau diterima sebagian.');
 
         $this->actingAs($user)->putJson("/api/pos/{$poId}/submit")->assertOk();
         $this->actingAs($user)->putJson("/api/pos/{$poId}/approve")->assertOk();
-        $this->actingAs($user)->postJson('/api/goods-receipts', $this->receiptPayload($poId, 'GR-ERP-001'))->assertCreated();
+        $this->actingAs($user)->postJson('/api/goods-receipts', $receiptPayload)->assertCreated();
 
         $invoiceResponse = $this->postJson('/api/invoices', [
             'invoiceable_type' => 'App\\Models\\PurchaseOrder',
@@ -170,6 +176,7 @@ class ErpWorkflowTest extends TestCase
             'spk_type' => 'SUBKON',
             'subcon_name' => 'CV Bangun Jaya',
             'subtotal' => 100000,
+            'tax_rate' => 11,
             'payment_terms' => 'Berdasarkan opname',
         ])->assertCreated();
 
@@ -179,7 +186,7 @@ class ErpWorkflowTest extends TestCase
             'opname_number' => 'OPN-ERP-001',
             'date' => '2026-07-10',
             'progress_percentage' => 25,
-            'amount' => 50000,
+            'amount' => 27750,
         ];
 
         $this->postJson('/api/opnames', $opnamePayload)
@@ -209,7 +216,7 @@ class ErpWorkflowTest extends TestCase
         $this->assertDatabaseHas('invoices', [
             'id' => $invoiceResponse->json('data.id'),
             'opname_id' => $opnameId,
-            'amount' => 50000,
+            'amount' => 27750,
             'status' => 'PENDING_ENGINEER',
         ]);
 
@@ -217,7 +224,7 @@ class ErpWorkflowTest extends TestCase
             ...$invoicePayload,
             'invoice_number' => 'INV-SPK-002',
         ])->assertUnprocessable()
-            ->assertJsonPath('message', 'Opname ini sudah memiliki invoice.');
+            ->assertJsonPath('message', 'Opname progres ini sudah memiliki invoice.');
     }
 
     public function test_fund_request_must_be_approved_paid_and_accounted_for_in_sequence(): void

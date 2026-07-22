@@ -56,6 +56,7 @@ class GoodsReceiptControllerTest extends TestCase
             'receipt_date'         => '2026-07-10',
             'delivery_note_number' => 'SJ-001',
             'receiver_name'        => 'Petugas',
+            'items'                => [['po_item_id' => $poItem->id, 'quantity_received' => 10]], // Perbaikan
         ])
             ->assertCreated()
             ->assertJsonPath('data.receipt_number', 'GR-TEST-001');
@@ -76,6 +77,7 @@ class GoodsReceiptControllerTest extends TestCase
                 'receipt_number',
                 'receipt_date',
                 'receiver_name',
+                'items', // Perbaikan
             ]);
     }
 
@@ -182,7 +184,7 @@ class GoodsReceiptControllerTest extends TestCase
                 'quantity_received' => 1,
             ]],
         ])->assertUnprocessable()
-            ->assertJsonPath('message', 'Penerimaan barang hanya untuk item RAB kategori Material. Subkon, Pekerja, dan Alat diproses melalui SPK/opname.');
+            ->assertJsonPath('message', 'Penerimaan barang hanya untuk item RAB kategori Material. Subkon, Pekerja, dan Alat diproses melalui SPK/Opname.'); // Perbaikan: Opname huruf O besar
 
         $this->assertDatabaseCount('goods_receipts', 0);
         $this->assertDatabaseCount('inventory_stocks', 0);

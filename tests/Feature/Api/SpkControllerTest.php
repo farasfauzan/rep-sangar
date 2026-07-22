@@ -7,8 +7,6 @@ use App\Models\Spk;
 
 class SpkControllerTest extends TestCase
 {
-    // ─── INDEX ────────────────────────────────────────────────────────────
-
     public function test_index_returns_paginated_spks(): void
     {
         $this->actingAsRole('LAPANGAN');
@@ -16,15 +14,8 @@ class SpkControllerTest extends TestCase
 
         $this->getJson('/api/spks')
             ->assertOk()
-            ->assertJsonStructure([
-                'current_page',
-                'data',
-                'per_page',
-                'total',
-            ]);
+            ->assertJsonStructure(['current_page', 'data', 'per_page', 'total']);
     }
-
-    // ─── STORE ────────────────────────────────────────────────────────────
 
     public function test_purchasing_legal_can_create_spk(): void
     {
@@ -37,6 +28,7 @@ class SpkControllerTest extends TestCase
             'spk_type'      => 'SUBKON',
             'subcon_name'   => 'CV Bangun Jaya',
             'subtotal'      => 200000,
+            'tax_rate'      => 11, // Wajib angka bulat
             'payment_terms' => 'Berdasarkan opname',
         ])
             ->assertCreated()
@@ -60,6 +52,7 @@ class SpkControllerTest extends TestCase
             'spk_type'    => 'SUBKON',
             'subcon_name' => 'PT Subcon',
             'subtotal'    => 100000,
+            'tax_rate'    => 11, // Wajib angka bulat
         ])
             ->assertCreated();
 
@@ -92,6 +85,7 @@ class SpkControllerTest extends TestCase
             'spk_type'    => 'SUBKON',
             'subcon_name' => 'CV Test',
             'subtotal'    => 50000,
+            'tax_rate'    => 11,
         ])
             ->assertUnprocessable()
             ->assertJsonValidationErrors(['spk_number']);
@@ -107,11 +101,10 @@ class SpkControllerTest extends TestCase
             'spk_type'    => 'SUBKON',
             'subcon_name' => 'CV Test',
             'subtotal'    => 50000,
+            'tax_rate'    => 11,
         ])
             ->assertForbidden();
     }
-
-    // ─── SUBMIT / APPROVE / REJECT STATUS TRANSITIONS ─────────────────────
 
     public function test_submit_transitions_from_draft(): void
     {
@@ -175,6 +168,7 @@ class SpkControllerTest extends TestCase
             'spk_type'    => 'MANDOR',
             'subcon_name' => 'Pak Budi',
             'subtotal'    => 50000000,
+            'tax_rate'    => 11,
         ])
             ->assertCreated()
             ->assertJsonPath('data.spk_type', 'MANDOR');
@@ -193,7 +187,7 @@ class SpkControllerTest extends TestCase
             'spk_type'    => 'SUBKON',
             'subcon_name' => 'CV Tanpa PPN',
             'subtotal'    => 10000000,
-            'include_ppn' => false,
+            'tax_rate'    => 0,
         ])
             ->assertCreated()
             ->assertJsonPath('data.tax_amount', '0.00')
